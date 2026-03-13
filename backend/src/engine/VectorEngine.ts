@@ -2,6 +2,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { createHash } from 'crypto';
+import { getEmbeddingRobust } from './hfCircuitBreaker.js';
 import axios from 'axios';
 import mongoose from 'mongoose';
 import { createClient } from 'redis';
@@ -68,27 +69,26 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
         const cachedResults = await redisClient.get(cacheKey);
         if (cachedResults) {
             cacheWaitMs = Date.now() - cacheStart;
-            const parsed = JSON.parse(cachedResults);
+            const parsed = JSON.parse(cachedResults as string);
             parsed.telemetry.totalMs = Date.now() - startTime;
             return parsed;
         }
     }
     cacheWaitMs = Date.now() - cacheStart;
 
-    // Step B (Embedding): Call the Hugging Face Inference API
+    // Step B (Embedding): Call the Hugging Face Inference API via Circuit Breaker
     embeddingStart = Date.now();
     let queryVectorArr: number[] = [];
     
     try {
-        const hfToken = process.env.HF_TOKEN;
-        const modelUrl = 'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2'; // Or your 1536d model
+        const result = await getEmbeddingRobust(queryText);
         
-        const response = await axios.post(
-            modelUrl,
-            { inputs: queryText },
-            { headers: { Authorization: `Bearer ${hfToken}` } }
-        );
-        queryVectorArr = response.data;
+        // Check if the circuit breaker returned the fallback error object
+        if (!Array.isArray(result) && result.error) {
+            return result as any; // Returns { error: 'Embedding Service Unavailable', status: 'Circuit Open' }
+        }
+        
+        queryVectorArr = result as number[];
     } catch (error) {
         console.error("Embedding API Error:", error);
         throw new Error("Failed to generate embedding");

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import axios from 'axios';
+import { getEmbeddingRobust } from './hfCircuitBreaker.js';
 
 // The Sink Schema: Defines the structure for storing chunks in MongoDB Atlas
 const VectorModel = mongoose.models.Document || mongoose.model('Document', new mongoose.Schema({
@@ -70,12 +70,11 @@ export async function processDocument(fileContent: string, fileName: string): Pr
         // Process current batch of 5 concurrently using Promise.all
         const vectors = await Promise.all(batch.map(async (textChunk) => {
             try {
-                const response = await axios.post(
-                    modelUrl,
-                    { inputs: textChunk },
-                    { headers: { Authorization: `Bearer ${hfToken}` } }
-                );
-                return response.data as number[];
+                const result = await getEmbeddingRobust(textChunk);
+                if (!Array.isArray(result) && result.error) {
+                    throw new Error(`Embedding Service Unavailable: ${(result as any).status}`);
+                }
+                return result as number[];
             } catch (error) {
                 console.error(`Error generating embedding for chunk in file: ${fileName}`, error);
                 throw new Error("Failed to generate embedding during ingestion");

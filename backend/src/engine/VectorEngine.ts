@@ -44,6 +44,7 @@ export interface SearchResponse {
         embeddingMs: number;
         retrievalMs: number;
         rerankingMs: number;
+        rerankingUs: number; // High-resolution C++ execution time in microseconds
         totalMs: number;
     }
 }
@@ -113,8 +114,9 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
     ]);
     retrievalMs = Date.now() - retrievalStart;
 
-    // Step D (The Re-rank): Pass vectors to C++ native addon
+    // Step D (The Re-rank): Pass vectors to C++ native addon (Zero-Copy Float32Array)
     rerankingStart = Date.now();
+    const hrtStart = process.hrtime.bigint(); // Microsecond-precision timer
     
     const rerankedResults = roughCandidates.map(doc => {
         const docVector = new Float32Array(doc.embedding);
@@ -123,6 +125,8 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
         return {
             documentId: doc._id.toString(),
             content: doc.content,
+            fileName: doc.fileName,
+            textChunk: doc.textChunk,
             similarity: score
         };
     });
@@ -130,7 +134,10 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
     // Step E (Final Result): Sort results based on C++ score and get top 10
     rerankedResults.sort((a, b) => b.similarity - a.similarity);
     const top10 = rerankedResults.slice(0, 10);
+    
+    const hrtEnd = process.hrtime.bigint();
     rerankingMs = Date.now() - rerankingStart;
+    const rerankingUs = Number(hrtEnd - hrtStart) / 1000; // nanoseconds -> microseconds
 
     const finalResponse: SearchResponse = {
         results: top10,
@@ -139,6 +146,7 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
             embeddingMs,
             retrievalMs,
             rerankingMs,
+            rerankingUs,
             totalMs: Date.now() - startTime
         }
     };

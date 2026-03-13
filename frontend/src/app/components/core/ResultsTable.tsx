@@ -3,6 +3,8 @@ import { Table2, Download, Copy } from 'lucide-react';
 interface SearchResult {
   documentId: string;
   content: string;
+  fileName?: string;
+  textChunk?: string;
   similarity: number;
 }
 
@@ -20,36 +22,34 @@ export function ResultsTable({ results = [] }: ResultsTableProps) {
            <button className="hover:text-[#00FF41] transition-colors flex items-center gap-1"><Download size={12} /> Export</button>
         </div>
       </div>
-      
+
       <div className="flex-1 overflow-auto bg-black p-0 custom-scrollbar relative">
          <table className="w-full text-left border-collapse">
            <thead className="sticky top-0 bg-[#0A0A0A] shadow-md z-10">
              <tr className="border-b border-[#333] text-gray-500 uppercase text-[10px] tracking-widest font-bold">
-               <th className="py-3 px-4 w-16">Rank</th>
-               <th className="py-3 px-4">Document ID</th>
-               <th className="py-3 px-4">Similarity Score</th>
-               <th className="py-3 px-4">Source Engine</th>
-               <th className="py-3 px-4 text-right">Re-rank Delta</th>
+               <th className="py-3 px-4 w-12">#</th>
+               <th className="py-3 px-4">Source File</th>
+               <th className="py-3 px-4">Text Snippet</th>
+               <th className="py-3 px-4 text-right">C++ Match Score</th>
              </tr>
            </thead>
            <tbody>
              {results.length === 0 && (
                <tr>
-                 <td colSpan={5} className="py-8 text-center text-gray-600 font-bold uppercase tracking-widest">Awaiting Query...</td>
+                 <td colSpan={4} className="py-8 text-center text-gray-600 font-bold uppercase tracking-widest">Awaiting Query...</td>
                </tr>
              )}
              {results.map((r, i) => (
                <tr key={r.documentId} className="border-b border-[#222] hover:bg-[#111] transition-colors group cursor-default">
                  <td className="py-2.5 px-4 text-gray-600 font-bold group-hover:text-white">#{i + 1}</td>
-                 <td className="py-2.5 px-4 text-gray-300 font-bold tracking-wide">{r.documentId}</td>
-                 <td className="py-2.5 px-4 text-[#00FF41] font-bold bg-[#00FF41]/5 border-l border-r border-transparent group-hover:border-[#00FF41]/20 group-hover:bg-[#00FF41]/10 transition-colors">
-                   {r.similarity.toFixed(4)}
+                 <td className="py-2.5 px-4">
+                   <span className="text-[#00FF41] text-[10px] font-bold uppercase bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/20">{r.fileName || r.documentId}</span>
                  </td>
-                 <td className="py-2.5 px-4 text-gray-400 uppercase text-[10px] tracking-wider font-bold">
-                   <span className="bg-[#222] px-2 py-1 border border-[#333]">MongoDB Atlas</span>
+                 <td className="py-2.5 px-4 text-gray-400 max-w-[300px] leading-relaxed">
+                   {r.textChunk?.slice(0, 120) || r.content || '—'}
                  </td>
-                 <td className="py-2.5 px-4 text-right font-bold tracking-wider">
-                     <span className="text-[#00FF41] bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/30">Native ▲</span>
+                 <td className="py-2.5 px-4 text-right">
+                   <span className="text-[#00FF41] font-bold font-mono bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/30">{r.similarity.toFixed(6)}</span>
                  </td>
                </tr>
              ))}

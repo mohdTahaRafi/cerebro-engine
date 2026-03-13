@@ -1,8 +1,11 @@
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -27,6 +30,25 @@ app.get('/', (req, res) => {
 });
 
 import { performSearch } from '../engine/VectorEngine.js';
+import { processDocument } from '../engine/IngestionService.js';
+
+app.post('/api/ingest', upload.single('document'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No document file provided' });
+        }
+
+        const fileContent = req.file.buffer.toString('utf-8');
+        const fileName = req.file.originalname;
+
+        // Process document into chunks, vectorize, and sink to MongoDB
+        const result = await processDocument(fileContent, fileName);
+        res.json(result);
+    } catch (error: any) {
+        console.error("Ingestion Route Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 app.post('/api/search', async (req, res) => {
     try {

@@ -5,12 +5,15 @@ interface Telemetry {
   embeddingMs: number;
   retrievalMs: number;
   rerankingMs: number;
+  rerankingUs: number; // High-resolution microsecond C++ timing
   totalMs: number;
 }
 
 interface SearchResult {
   documentId: string;
   content: string;
+  fileName?: string;
+  textChunk?: string;
   similarity: number;
 }
 
@@ -36,7 +39,8 @@ export function useCerebroSearch() {
     setIsCircuitOpen(false);
 
     try {
-      const response = await fetch('http://localhost:3000/api/search', {
+      // Use Vite proxy — routes /api -> localhost:5000
+      const response = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),

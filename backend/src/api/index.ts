@@ -26,29 +26,31 @@ app.get('/', (req, res) => {
     res.json({ message: 'Cerebro Backend is running!' });
 });
 
-app.post('/similarity', (req, res) => {
+import { performSearch } from '../engine/VectorEngine.js';
+
+app.post('/api/search', async (req, res) => {
     try {
-        const { vecA, vecB } = req.body;
+        const { query } = req.body;
         
-        if (!Array.isArray(vecA) || !Array.isArray(vecB)) {
-            return res.status(400).json({ error: 'vecA and vecB must be arrays of numbers' });
+        if (!query || typeof query !== 'string') {
+            return res.status(400).json({ error: 'Search query string is required' });
         }
 
-        // Convert the JS arrays to Float32Arrays for the native addon
-        const float32A = new Float32Array(vecA);
-        const float32B = new Float32Array(vecB);
-
-        // Call the C++ function!
-        const score = cerebroCore.getSimilarityScore(float32A, float32B);
+        // Execute Vector Search orchestration
+        const response = await performSearch(query);
         
-        res.json({ score });
+        // Handle Circuit Breaker Fallbacks being bubbled up
+        if ((response as any).status === 'Circuit Open') {
+             return res.status(503).json(response);
+        }
+        
+        res.json(response);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`🚀 Backend running on port ${PORT}`);
-    console.log('🧪 Native Addon loaded successfully!');
+    console.log(`Cerebro Backend running on port ${PORT} | C++ Addon: ACTIVE`);
 });

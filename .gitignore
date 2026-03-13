@@ -1,0 +1,149 @@
+# ============================================================================
+# Cerebro — Project .gitignore
+# Stack: React (Vite) + Node.js (TypeScript) + Native C++ Addon (Node-API)
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# Node.js / Frontend
+# ----------------------------------------------------------------------------
+
+# Dependencies
+node_modules/
+
+# Production build output (Vite)
+dist/
+dist-ssr/
+
+# Package manager lock files (optional — uncomment if you want to track them)
+# package-lock.json
+# pnpm-lock.yaml
+# yarn.lock
+
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.*.local
+
+# Vite cache & temp files
+*.local
+.vite/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Debug & runtime logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# ----------------------------------------------------------------------------
+# C++ Native Addon (node-gyp / Node-API / N-API)
+# ----------------------------------------------------------------------------
+
+# node-gyp generated build directory (CMake / Make artifacts)
+build/
+
+# Compiled native addon binaries
+*.node
+
+# node-gyp / Visual Studio generated project files
+binding.sln
+binding.Makefile
+
+# CMake artifacts (if using cmake-js)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Object files & compiled libraries
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.lib
+*.exp
+*.pdb
+
+# Pre-built binary caches (node-pre-gyp / prebuild)
+prebuilds/
+stage/
+
+
+# ----------------------------------------------------------------------------
+# Operating System Junk
+# ----------------------------------------------------------------------------
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.Trash-*
+.nfs*
+
+
+# ----------------------------------------------------------------------------
+# IDE & Editor Settings (keep repo environment-agnostic)
+# ----------------------------------------------------------------------------
+
+# Visual Studio Code
+.vscode/
+
+# JetBrains (WebStorm, CLion, etc.)
+.idea/
+*.iml
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+Session.vim
+.netrwhist
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Emacs
+\#*\#
+.dir-locals.el
+
+
+# ----------------------------------------------------------------------------
+# Miscellaneous
+# ----------------------------------------------------------------------------
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Test output
+.nyc_output/
+
+# Storybook build
+storybook-static/
+
+# Sentry
+.sentryclirc

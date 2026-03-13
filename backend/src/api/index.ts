@@ -52,5 +52,5 @@ app.post('/api/search', async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`Cerebro Backend running on port ${PORT} | C++ Addon: ACTIVE`);
+    console.log(`[CEREBRO] Backend Online | C++ SIMD Core: ACTIVE`);
 });

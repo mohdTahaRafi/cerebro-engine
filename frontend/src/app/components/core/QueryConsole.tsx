@@ -1,11 +1,22 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Hash, Code, Save, Play } from 'lucide-react';
 
-export function QueryConsole() {
+interface QueryConsoleProps {
+  onSearch?: (query: string) => void;
+  isSearching?: boolean;
+}
+
+export function QueryConsole({ onSearch, isSearching }: QueryConsoleProps) {
   const [query, setQuery] = useState("SELECT * FROM vectors\nWHERE intent = 'payment_routing'\nAND threshold > 0.85\nLIMIT 10");
   
   // Fake hash calculation for visuals
   const mockHash = "a7b8f921e4c3d6a9b0...8f2a1c";
+
+  const handleSearch = () => {
+    if (onSearch && query.trim()) {
+      onSearch(query);
+    }
+  };
 
   return (
     <div className="w-[340px] flex-shrink-0 border-r border-[#333] bg-[#0A0A0A] flex flex-col font-mono text-xs text-gray-300">
@@ -13,7 +24,13 @@ export function QueryConsole() {
         <span className="flex items-center gap-2"><Code size={14} className="text-[#00FF41]" /> Query Console</span>
         <div className="flex gap-2 text-gray-400">
            <button className="hover:text-white transition-colors"><Save size={14} /></button>
-           <button className="hover:text-[#00FF41] transition-colors"><Play size={14} /></button>
+           <button 
+             onClick={handleSearch}
+             disabled={isSearching}
+             className={`transition-colors ${isSearching ? 'text-gray-600 cursor-not-allowed' : 'hover:text-[#00FF41]'}`}
+           >
+             <Play size={14} className={isSearching ? 'animate-pulse' : ''} />
+           </button>
         </div>
       </div>
       

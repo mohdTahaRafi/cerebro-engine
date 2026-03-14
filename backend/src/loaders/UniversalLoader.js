@@ -3,28 +3,37 @@ import path from 'path';
 import * as cheerio from 'cheerio';
 import { PDFParse } from 'pdf-parse';
 import { createRequire } from 'module';
+import { TextSanitizer } from '../utils/TextSanitizer.js';
+
 const require = createRequire(import.meta.url);
 const mammoth = require('mammoth');
 
 export class UniversalLoader {
     async load(inputSource) {
+        let result;
         if (this._isUrl(inputSource)) {
-            return await this._extractWeb(inputSource);
+            result = await this._extractWeb(inputSource);
+        } else {
+            const ext = path.extname(inputSource).toLowerCase();
+            switch (ext) {
+                case '.pdf':
+                    result = await this._extractPDF(inputSource);
+                    break;
+                case '.docx':
+                    result = await this._extractDocx(inputSource);
+                    break;
+                case '.txt':
+                case '.md':
+                    result = await this._extractText(inputSource);
+                    break;
+                default:
+                    throw new Error(`Unsupported file type: ${ext}`);
+            }
         }
 
-        const ext = path.extname(inputSource).toLowerCase();
-        
-        switch (ext) {
-            case '.pdf':
-                return await this._extractPDF(inputSource);
-            case '.docx':
-                return await this._extractDocx(inputSource);
-            case '.txt':
-            case '.md':
-                return await this._extractText(inputSource);
-            default:
-                throw new Error(`Unsupported file type: ${ext}`);
-        }
+        // Sanitize the raw content before returning
+        result.content = TextSanitizer.sanitize(result.content, { maskUrls: true, maskEmails: true });
+        return result;
     }
 
     _isUrl(input) {

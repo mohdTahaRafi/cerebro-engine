@@ -37,6 +37,7 @@ export function useCerebroSearch() {
     setIsSearching(true);
     setError(null);
     setIsCircuitOpen(false);
+    console.log(`FRONTEND: Initiating Search for [${query}]...`);
 
     try {
       // Use Vite proxy — routes /api -> localhost:5000

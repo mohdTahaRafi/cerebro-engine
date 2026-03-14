@@ -21,15 +21,27 @@ export function computeSimilarity(v1: Float32Array, v2: Float32Array): number {
     return cerebroCore.getSimilarityScore(v1, v2);
 }
 
-// Example Mongoose Model (Needs to be replaced with your actual schema)
-const VectorModel = mongoose.model('Document', new mongoose.Schema({
-    content: String,
-    embedding: [Number]
+// Unify Schema with IngestionService
+const VectorModel = mongoose.models.Document || mongoose.model('Document', new mongoose.Schema({
+    fileName: String,
+    textChunk: String,
+    vector: [Number],
+    metadata: mongoose.Schema.Types.Mixed
 }));
 
 // Redis Client Setup (Connect this during app startup)
-export const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
+export const redisClient = createClient({ 
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    socket: {
+        connectTimeout: 2000,
+        reconnectStrategy: (retries) => retries > 2 ? false : 500 // Fail fast if not there
+    }
+});
+redisClient.on('error', (err) => {
+    // Only log once to avoid terminal spam
+    if (err.code === 'ECONNREFUSED') return; 
+    console.log('Redis Client Error', err);
+});
 
 export interface SearchResult {
     documentId: string;
@@ -66,13 +78,18 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
     const queryHash = createHash('sha256').update(queryText).digest('hex');
     const cacheKey = `search:${queryHash}`;
     
-    if (redisClient.isOpen) {
-        const cachedResults = await redisClient.get(cacheKey);
-        if (cachedResults) {
-            cacheWaitMs = Date.now() - cacheStart;
-            const parsed = JSON.parse(cachedResults as string);
-            parsed.telemetry.totalMs = Date.now() - startTime;
-            return parsed;
+    if (redisClient.isReady) {
+        try {
+            const cachedResults = await redisClient.get(cacheKey);
+            if (cachedResults) {
+                console.log(`ENGINE: Cache Hit for [${queryHash}]`);
+                cacheWaitMs = Date.now() - cacheStart;
+                const parsed = JSON.parse(cachedResults as string);
+                parsed.telemetry.totalMs = Date.now() - startTime;
+                return parsed;
+            }
+        } catch (e) {
+            console.error("ENGINE: Redis Cache Error (Lookup)", e);
         }
     }
     cacheWaitMs = Date.now() - cacheStart;
@@ -105,7 +122,7 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
         {
             "$vectorSearch": {
                 "index": "vector_index",
-                "path": "embedding",
+                "path": "vector",
                 "queryVector": queryVectorArr,
                 "numCandidates": 100, // Search space
                 "limit": 50 // Top 50 rough candidates
@@ -115,16 +132,17 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
     retrievalMs = Date.now() - retrievalStart;
 
     // Step D (The Re-rank): Pass vectors to C++ native addon (Zero-Copy Float32Array)
+    console.log(`ENGINE: Calling C++ Addon with [${roughCandidates.length}] candidates...`);
     rerankingStart = Date.now();
     const hrtStart = process.hrtime.bigint(); // Microsecond-precision timer
     
     const rerankedResults = roughCandidates.map(doc => {
-        const docVector = new Float32Array(doc.embedding);
+        const docVector = new Float32Array(doc.vector);
         const score = computeSimilarity(queryVector, docVector);
         
         return {
             documentId: doc._id.toString(),
-            content: doc.content,
+            content: doc.textChunk || doc.content || "",
             fileName: doc.fileName,
             textChunk: doc.textChunk,
             similarity: score
@@ -151,11 +169,11 @@ export async function performSearch(queryText: string): Promise<SearchResponse> 
         }
     };
 
-    // Cache the fully computed result
-    if (redisClient.isOpen) {
-        await redisClient.set(cacheKey, JSON.stringify(finalResponse), {
+    // Cache the fully computed result (backgrounded)
+    if (redisClient.isReady) {
+        redisClient.set(cacheKey, JSON.stringify(finalResponse), {
             EX: 3600 // Cache for 1 hour
-        });
+        }).catch(e => console.error("ENGINE: Redis Cache Error (Storage)", e));
     }
 
     return finalResponse;

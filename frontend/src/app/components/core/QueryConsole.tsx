@@ -69,7 +69,14 @@ export function QueryConsole({ onSearch, isSearching }: QueryConsoleProps) {
               <span className="text-gray-400">Mode</span>
               <span className="text-white">STRICT</span>
            </div>
-        </div>
+            <button 
+              onClick={handleSearch}
+              disabled={isSearching}
+              className={`mt-2 w-full py-2 border font-bold uppercase tracking-[0.2em] transition-all duration-300 ${isSearching ? 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed' : 'bg-[#00FF41]/10 border-[#00FF41]/30 text-[#00FF41] hover:bg-[#00FF41] hover:text-black shadow-[0_0_15px_rgba(0,255,65,0.1)]'}`}
+            >
+               {isSearching ? 'Tracing...' : 'Execute Architecture Trace'}
+            </button>
+         </div>
       </div>
     </div>
   );

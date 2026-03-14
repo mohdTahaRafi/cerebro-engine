@@ -3,7 +3,7 @@ import CircuitBreaker from 'opossum';
 
 async function fetchEmbeddingFromHF(text: string): Promise<number[]> {
     const hfToken = process.env.HF_TOKEN;
-    const modelUrl = 'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2';
+    const modelUrl = 'https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5';
     
     const response = await axios.post(
         modelUrl,

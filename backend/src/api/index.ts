@@ -1,6 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import mongoose from 'mongoose';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -14,6 +16,19 @@ const require = createRequire(import.meta.url);
 // Load the compiled C++ addon
 const cerebroCore = require(resolve(__dirname, '../../build/Release/cerebro_core.node'));
 
+// Connect to MongoDB Atlas
+const MONGO_URI = process.env.MONGO_URI || '';
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('[CEREBRO] MongoDB Atlas: CONNECTED'))
+  .catch((err) => console.error('[CEREBRO] MongoDB connection error:', err.message));
+
+import { performSearch, redisClient } from '../engine/VectorEngine.js';
+import { processDocument } from '../engine/IngestionService.js';
+
+// Connect to Redis for caching
+redisClient.connect()
+  .then(() => console.log('[CEREBRO] Redis Cache: CONNECTED'))
+  .catch((err) => console.error('[CEREBRO] Redis connection error:', err.message));
 
 const app = express();
 app.use(cors());
@@ -28,9 +43,6 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
     res.json({ message: 'Cerebro Backend is running!' });
 });
-
-import { performSearch } from '../engine/VectorEngine.js';
-import { processDocument } from '../engine/IngestionService.js';
 
 app.post('/api/ingest', upload.single('document'), async (req, res) => {
     try {
@@ -53,6 +65,7 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
 app.post('/api/search', async (req, res) => {
     try {
         const { query } = req.body;
+        console.log(`BACKEND: Received Search Request for [${query}]`);
         
         if (!query || typeof query !== 'string') {
             return res.status(400).json({ error: 'Search query string is required' });

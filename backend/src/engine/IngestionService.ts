@@ -54,8 +54,6 @@ export async function processDocument(fileContent: string, fileName: string): Pr
 
     // Step A (The Chunker): Sliding Window Chunker
     const chunks = chunkText(fileContent, 500, 50);
-    const hfToken = process.env.HF_TOKEN;
-    const modelUrl = 'https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2'; // Or your 1536d model
 
     // Output array to hold chunks with their embeddings
     const processedChunks: { textChunk: string; vector: number[] }[] = [];

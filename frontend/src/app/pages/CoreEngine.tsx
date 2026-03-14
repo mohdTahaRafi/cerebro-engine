@@ -20,10 +20,10 @@ export function CoreEngine() {
 
       {/* Center Pane: Execution Plan (Top) & Results Table (Bottom) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#050505] relative">
-        {/* Circuit Breaker Safeguard Mode Alert */}
-        {isCircuitOpen && (
+        {/* Error / Circuit Breaker Safeguard Mode Alert */}
+        {(isCircuitOpen || error) && (
            <div className="absolute top-0 left-0 right-0 bg-[#FF003C] text-white font-bold p-3 text-center uppercase tracking-[0.2em] font-mono z-50 animate-pulse shadow-[0_0_20px_#FF003C]">
-              ⚠️ SYSTEM ALERT: {error} — Safeguard Mode Active ⚠️
+              ⚠️ {isCircuitOpen ? 'SYSTEM ALERT' : 'NETWORK ERROR'}: {error} ⚠️
            </div>
         )}
         <ExecutionPlan telemetry={telemetry} />

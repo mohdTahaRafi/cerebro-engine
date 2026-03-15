@@ -23,7 +23,8 @@
     "node-addon-api": "^8.6.0",
     "opossum": "^9.0.0",
     "pdf-parse": "^2.4.5",
-    "redis": "^5.11.0"
+    "redis": "^5.11.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

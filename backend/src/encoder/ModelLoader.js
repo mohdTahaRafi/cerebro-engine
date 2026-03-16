@@ -29,7 +29,9 @@ export class ModelLoader {
         // Wrap the loading process in a promise that concurrent callers can await
         this.loadPromise = (async () => {
             try {
-                this.instance = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+                this.instance = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+                    dtype: 'fp32', // Explicitly set to silence precision warnings
+                });
                 console.log('[ModelLoader] Model loaded successfully.');
                 return this.instance;
             } catch (error) {

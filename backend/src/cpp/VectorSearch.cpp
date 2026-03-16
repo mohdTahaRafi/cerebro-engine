@@ -10,7 +10,8 @@ void VectorSearchImpl::AddDocumentVectors(const float* vectorData, size_t totalV
 Napi::Object CerebroEngine::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "CerebroEngine", {
         InstanceMethod("InitEngine", &CerebroEngine::InitEngine),
-        InstanceMethod("ReceiveVectors", &CerebroEngine::ReceiveVectors)
+        InstanceMethod("ReceiveVectors", &CerebroEngine::ReceiveVectors),
+        InstanceMethod("SearchVectors", &CerebroEngine::SearchVectors)
     });
 
     Napi::FunctionReference* constructor = new Napi::FunctionReference();
@@ -54,8 +55,37 @@ Napi::Value CerebroEngine::ReceiveVectors(const Napi::CallbackInfo& info) {
     std::cout << "[C++ Core] Zero-Copy Bridge: Received " << length << " floats at " << dataPtr << "." << std::endl;
 
     Napi::Object result = Napi::Object::New(env);
-    result.Set("floatsReceived", Napi::Number::New(env, length));
+    result.Set("floatsReceived", Napi::Number::New(env, (double)length));
     return result;
+}
+
+Napi::Value CerebroEngine::SearchVectors(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsTypedArray()) {
+        Napi::TypeError::New(env, "Expects two arguments (Query Vector, Dataset)").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    Napi::Float32Array queryArr = info[0].As<Napi::Float32Array>();
+    Napi::Float32Array datasetArr = info[1].As<Napi::Float32Array>();
+
+    const float* queryPtr = queryArr.Data();
+    const float* datasetPtr = datasetArr.Data();
+
+    size_t dim = 384;
+    size_t numVectors = datasetArr.ElementLength() / dim;
+
+    // Create result array
+    Napi::Float32Array results = Napi::Float32Array::New(env, numVectors);
+    float* resultsPtr = results.Data();
+
+    // The Similarity Loop
+    for (size_t i = 0; i < numVectors; i++) {
+        resultsPtr[i] = SimdDotProduct(queryPtr, datasetPtr + (i * dim));
+    }
+
+    return results;
 }
 
 } // namespace Cerebro

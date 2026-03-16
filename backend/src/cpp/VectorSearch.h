@@ -19,6 +19,7 @@ public:
 private:
     Napi::Value InitEngine(const Napi::CallbackInfo& info);
     Napi::Value ReceiveVectors(const Napi::CallbackInfo& info);
+    Napi::Value SearchVectors(const Napi::CallbackInfo& info);
 };
 
 } // namespace Cerebro

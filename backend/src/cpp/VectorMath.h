@@ -35,6 +35,15 @@ public:
     virtual ~VectorSearch() {}
 };
 
+/**
+ * @brief High-performance SIMD-accelerated Dot Product.
+ * 
+ * @param a Pointer to 384-length float array.
+ * @param b Pointer to 384-length float array.
+ * @return float Computed similarity score.
+ */
+float SimdDotProduct(const float* a, const float* b);
+
 } // namespace Cerebro
 
 #endif // VECTOR_MATH_H

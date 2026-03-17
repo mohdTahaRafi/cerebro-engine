@@ -1,10 +1,24 @@
+// This file implements a Top-K priority queue using a Min-Heap to efficiently retrieve the most relevant search results.
 #include "VectorSearch.h"
 #include <iostream>
+#include <queue>
+#include <vector>
+#include <algorithm>
 
 namespace Cerebro {
 
+struct SearchResult {
+    int index;
+    float score;
+};
+
+struct CompareResults {
+    bool operator()(const SearchResult& a, const SearchResult& b) {
+        return a.score > b.score;
+    }
+};
+
 void VectorSearchImpl::AddDocumentVectors(const float* vectorData, size_t totalVectors, size_t dimensions) {
-    // Implementation for later
 }
 
 Napi::Object CerebroEngine::Init(Napi::Env env, Napi::Object exports) {
@@ -23,7 +37,6 @@ Napi::Object CerebroEngine::Init(Napi::Env env, Napi::Object exports) {
 }
 
 CerebroEngine::CerebroEngine(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CerebroEngine>(info) {
-    // Constructor logic
 }
 
 Napi::Value CerebroEngine::InitEngine(const Napi::CallbackInfo& info) {
@@ -48,7 +61,6 @@ Napi::Value CerebroEngine::ReceiveVectors(const Napi::CallbackInfo& info) {
 
     Napi::Float32Array floatArray = info[0].As<Napi::Float32Array>();
     
-    // Zero-Copy Bridge: Access raw pointer directly from memory
     const float* dataPtr = floatArray.Data();
     size_t length = floatArray.ElementLength();
 
@@ -62,13 +74,14 @@ Napi::Value CerebroEngine::ReceiveVectors(const Napi::CallbackInfo& info) {
 Napi::Value CerebroEngine::SearchVectors(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsTypedArray()) {
-        Napi::TypeError::New(env, "Expects two arguments (Query Vector, Dataset)").ThrowAsJavaScriptException();
+    if (info.Length() < 3 || !info[0].IsTypedArray() || !info[1].IsTypedArray() || !info[2].IsNumber()) {
+        Napi::TypeError::New(env, "Expects strings (Query Vector, Dataset, K)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
     Napi::Float32Array queryArr = info[0].As<Napi::Float32Array>();
     Napi::Float32Array datasetArr = info[1].As<Napi::Float32Array>();
+    int k = info[2].As<Napi::Number>().Int32Value();
 
     const float* queryPtr = queryArr.Data();
     const float* datasetPtr = datasetArr.Data();
@@ -76,13 +89,29 @@ Napi::Value CerebroEngine::SearchVectors(const Napi::CallbackInfo& info) {
     size_t dim = 384;
     size_t numVectors = datasetArr.ElementLength() / dim;
 
-    // Create result array
-    Napi::Float32Array results = Napi::Float32Array::New(env, numVectors);
-    float* resultsPtr = results.Data();
+    std::priority_queue<SearchResult, std::vector<SearchResult>, CompareResults> minHeap;
 
-    // The Similarity Loop
     for (size_t i = 0; i < numVectors; i++) {
-        resultsPtr[i] = SimdDotProduct(queryPtr, datasetPtr + (i * dim));
+        float score = SimdDotProduct(queryPtr, datasetPtr + (i * dim));
+        minHeap.push({(int)i, score});
+        if ((int)minHeap.size() > k) {
+            minHeap.pop();
+        }
+    }
+
+    std::vector<SearchResult> topK;
+    while (!minHeap.empty()) {
+        topK.push_back(minHeap.top());
+        minHeap.pop();
+    }
+    std::reverse(topK.begin(), topK.end());
+
+    Napi::Array results = Napi::Array::New(env, topK.size());
+    for (size_t i = 0; i < topK.size(); i++) {
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("index", Napi::Number::New(env, topK[i].index));
+        obj.Set("score", Napi::Number::New(env, topK[i].score));
+        results[i] = obj;
     }
 
     return results;

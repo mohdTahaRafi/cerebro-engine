@@ -2,7 +2,7 @@
 import { createRequire } from 'module';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { lexicalSearch } from './DatabaseService.js';
+import { lexicalSearch, getChunksByIds } from './DatabaseService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -35,11 +35,13 @@ export async function hybridSearch(queryText, queryVector, dataset, limitK = 5) 
         fusedScores.set(id, (fusedScores.get(id) || 0) + rrfScore);
     });
 
-    const finalResults = Array.from(fusedScores.entries())
-        .map(([id, score]) => ({ _id: id, rrfScore: score }))
-        .sort((a, b) => b.rrfScore - a.rrfScore)
-        .slice(0, limitK);
+    const sortedIds = Array.from(fusedScores.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limitK)
+        .map(entry => entry[0]);
 
-    console.log('Hybrid search complete. Top result score: ' + (finalResults.length > 0 ? finalResults[0].rrfScore : 0));
-    return finalResults;
+    const hydratedDocs = await getChunksByIds(sortedIds);
+
+    console.log('Hybrid search complete. Hydrated docs count: ' + hydratedDocs.length);
+    return hydratedDocs;
 }

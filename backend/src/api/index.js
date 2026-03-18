@@ -45,29 +45,37 @@ app.get('/health', (req, res) => {
  * Load -> Chunk -> Encode -> Sink (to MongoDB)
  */
 app.post('/api/ingest', upload.single('document'), async (req, res) => {
+    let currentPath = '';
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No document provided.' });
         }
 
-        const originalPath = req.file.path;
+        currentPath = req.file.path;
         const extension = path.extname(req.file.originalname);
-        const newPath = `${originalPath}${extension}`;
-        
+        const newPath = `${currentPath}${extension}`;
+
         console.log(`[DEBUG] Ingesting: ${req.file.originalname}, Ext: ${extension}, Path: ${newPath}`);
 
         // Rename to preserve extension for UniversalLoader
-        await fs.rename(originalPath, newPath);
+        await fs.rename(currentPath, newPath);
+        currentPath = newPath; // Update reference for tracking
 
-        const result = await ingestDocument(newPath);
+        const result = await ingestDocument(currentPath);
 
-        // Cleanup
-        await fs.unlink(newPath);
+        // Cleanup ONLY on success
+        await fs.unlink(currentPath);
+        console.log(`[DEBUG] Ingestion successful, temporary file removed: ${currentPath}`);
 
         res.json(result);
     } catch (error) {
-        console.error('Ingestion error:', error);
-        res.status(500).json({ error: error.message });
+        console.error(`[Ingestion Error] Failure. File preserved at: ${currentPath}`);
+        console.error(error);
+        res.status(500).json({ 
+            error: error.message, 
+            preservedPath: currentPath,
+            message: "Ingestion failed. Temporary file has been kept on the server for retry."
+        });
     }
 });
 
@@ -90,11 +98,11 @@ app.post('/api/search', async (req, res) => {
         // Note: For now, we need to handle the 'dataset' retrieval part.
         // In a real production setup, we'd fetch candidates from DB first.
         // For the purpose of the 'build' we verified, we'll implement the retrieval logic here or in SearchService.
-        
+
         // FUTURE: Fetch candidates from MongoDB $vectorSearch or $text search
         // For now, let's call hybridSearch. We might need to update SearchService to handle its own retrieval.
         const results = await hybridSearch(query, queryVector, null, 10);
-        
+
         res.json({
             results,
             query

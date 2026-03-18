@@ -43,8 +43,9 @@ async function runTests() {
     // CASE A: The Perfect File
     try {
         const dataA = await loader.load(cleanTxtPath);
-        if (typeof dataA.content === 'string' && dataA.metadata.source === cleanTxtPath) {
-            report('Case A (The Perfect File)', true, null, dataA.content);
+        const combinedText = dataA.map(c => c.text).join(' ');
+        if (Array.isArray(dataA) && dataA.length > 0 && dataA[0].metadata.source === cleanTxtPath) {
+            report('Case A (The Perfect File)', true, null, combinedText);
         } else {
             report('Case A (The Perfect File)', false, 'Output format mismatch.');
         }
@@ -55,13 +56,14 @@ async function runTests() {
     // CASE B: The Messy PDF
     try {
         const dataB = await loader.load(pdfPath);
-        const hasCid = dataB.content.includes('cid:10') || dataB.content.includes('(cid:');
-        const hasTooManyNewlines = dataB.content.includes('\\n\\n\\n') || dataB.content.includes('\n\n\n');
+        const combinedText = dataB.map(c => c.text).join(' ');
+        const hasCid = combinedText.includes('cid:10') || combinedText.includes('(cid:');
+        const hasTooManyNewlines = combinedText.includes('\\n\\n\\n') || combinedText.includes('\n\n\n');
         
-        if (!hasCid && !hasTooManyNewlines && dataB.content.length > 100) {
-            report('Case B (The Messy PDF)', true, null, dataB.content);
+        if (!hasCid && !hasTooManyNewlines && combinedText.length > 100) {
+            report('Case B (The Messy PDF)', true, null, combinedText);
         } else {
-            report('Case B (The Messy PDF)', false, `Contains Artifacts? CID: ${hasCid}, Multiple \\n: ${hasTooManyNewlines}. Valid Length: ${dataB.content.length > 100}`);
+            report('Case B (The Messy PDF)', false, `Contains Artifacts? CID: ${hasCid}, Multiple \\n: ${hasTooManyNewlines}. Valid Length: ${combinedText.length > 100}`);
         }
     } catch(e) {
         report('Case B (The Messy PDF)', false, e.message);
@@ -71,10 +73,11 @@ async function runTests() {
     try {
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // For testing only
         const dataC = await loader.load('https://example.com');
-        const hasHtmlTags = /<html[^>]*>|<\/html>|<script[^>]*>|<\/script>/i.test(dataC.content);
+        const combinedText = dataC.map(c => c.text).join(' ');
+        const hasHtmlTags = /<html[^>]*>|<\/html>|<script[^>]*>|<\/script>/i.test(combinedText);
         
-        if (!hasHtmlTags && dataC.content.includes('Example Domain')) {
-            report('Case C (The Web Scraper)', true, null, dataC.content);
+        if (!hasHtmlTags && combinedText.includes('Example Domain')) {
+            report('Case C (The Web Scraper)', true, null, combinedText);
         } else {
             report('Case C (The Web Scraper)', false, 'HTML Tags leaked into output.');
         }
@@ -85,10 +88,10 @@ async function runTests() {
     // CASE D: The Edge Case
     try {
         const dataD = await loader.load(emptyTxtPath);
-        if (dataD.content === '') {
-            report('Case D (The Edge Case)', true, null, dataD.content);
+        if (Array.isArray(dataD) && dataD.length === 0) {
+            report('Case D (The Edge Case)', true, null, "");
         } else {
-            report('Case D (The Edge Case)', false, 'Did not return empty string for empty file.');
+            report('Case D (The Edge Case)', false, 'Did not return empty array for empty file.');
         }
     } catch(e) {
         report('Case D (The Edge Case)', true, `Handled gracefully via throw: ${e.message}`);

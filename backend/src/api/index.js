@@ -14,14 +14,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const upload = multer({ dest: 'uploads/' });
 
 const app = express();
+const PORT = process.env.PORT || 5000;
+
 app.use(cors());
 app.use(express.json());
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
-    .then(() => console.log('[CEREBRO] MongoDB Connected'))
-    .catch(err => console.error('[CEREBRO] MongoDB connection error:', err));
+    .then(() => {
+        console.log('[CEREBRO] MongoDB Connected');
+        app.listen(PORT, () => {
+            console.log(`[CEREBRO] Backend Online at http://localhost:${PORT}`);
+            console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
+        });
+    })
+    .catch(err => {
+        console.error('[CEREBRO] MongoDB connection error:', err);
+        process.exit(1);
+    });
 
 // Routes
 app.get('/health', (req, res) => {
@@ -43,6 +54,8 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
         const extension = path.extname(req.file.originalname);
         const newPath = `${originalPath}${extension}`;
         
+        console.log(`[DEBUG] Ingesting: ${req.file.originalname}, Ext: ${extension}, Path: ${newPath}`);
+
         // Rename to preserve extension for UniversalLoader
         await fs.rename(originalPath, newPath);
 
@@ -93,8 +106,3 @@ app.post('/api/search', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`[CEREBRO] Backend Online at http://localhost:${PORT}`);
-    console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
-});

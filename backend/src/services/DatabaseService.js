@@ -1,7 +1,23 @@
-// This service handles MongoDB retrieval operations including lexical search and data hydration by IDs.
+// This service handles MongoDB operations including lexical search, sink (insertion), and data hydration by IDs.
 import mongoose from 'mongoose';
 
 const { ObjectId } = mongoose.Types;
+
+/**
+ * Persists chunks to the 'chunks' collection in MongoDB.
+ * @param {Array} chunks - Array of chunk objects with text, vector, and metadata.
+ */
+export async function sinkChunks(chunks) {
+    const db = mongoose.connection.db;
+    const collection = db.collection('chunks');
+    
+    // Ensure text index exists for lexical search
+    await collection.createIndex({ text: "text" });
+    
+    const result = await collection.insertMany(chunks);
+    console.log(`[DatabaseService] Successfully persisted ${result.insertedCount} chunks to MongoDB.`);
+    return result;
+}
 
 export async function lexicalSearch(queryText, limitK = 50) {
     const db = mongoose.connection.db;

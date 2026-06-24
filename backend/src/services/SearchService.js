@@ -37,17 +37,22 @@ export async function hybridSearch(queryText, queryVector, providedDataset = nul
         const db = mongoose.connection.db;
         const collection = db.collection('chunks');
         
-        candidates = await collection.aggregate([
-            {
-                "$vectorSearch": {
-                    "index": "vector_index", // Matches the project's standard index name
-                    "path": "vector",
-                    "queryVector": Array.from(queryVector),
-                    "numCandidates": 100,
-                    "limit": 50
+        try {
+            candidates = await collection.aggregate([
+                {
+                    "$vectorSearch": {
+                        "index": "vector_index", // Matches the project's standard index name
+                        "path": "vector",
+                        "queryVector": Array.from(queryVector),
+                        "numCandidates": 100,
+                        "limit": 50
+                    }
                 }
-            }
-        ]).toArray();
+            ]).toArray();
+        } catch (error) {
+            console.warn("[SearchService] Atlas $vectorSearch unavailable. Falling back to ultra-fast local C++ native retrieval.");
+            candidates = await collection.find({}, { projection: { vector: 1 } }).toArray();
+        }
 
         // Pass retrieved vectors to C++ Core for precise dot-product reranking
         if (candidates.length > 0) {

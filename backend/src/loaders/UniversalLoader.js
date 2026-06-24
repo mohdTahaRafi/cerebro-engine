@@ -50,10 +50,24 @@ export class UniversalLoader {
 
         if (Array.isArray(extraction.content)) {
             // Tabular data already comes in chunks
-            return extraction.content.map(text => ({
+            return extraction.content.map((text, i) => ({
                 text,
-                metadata: extraction.metadata
+                metadata: { ...extraction.metadata, position: `Row ${i + 1}` }
             }));
+        } else if (extraction.pages) {
+            // Data that has explicit page/section boundaries
+            const finalChunks = [];
+            extraction.pages.forEach((page) => {
+                const processedText = TextSanitizer.sanitize(page.text, { maskUrls: true, maskEmails: true });
+                const chunks = chunker.chunk(processedText);
+                chunks.forEach((chunkText, j) => {
+                    finalChunks.push({
+                        text: chunkText,
+                        metadata: { ...extraction.metadata, position: `Page ${page.pageNumber}` }
+                    });
+                });
+            });
+            return finalChunks;
         } else {
             // Textual data: Sanitize then Chunk
             let processedText = extraction.content;
@@ -64,9 +78,9 @@ export class UniversalLoader {
             // Apply semantic chunker to non-tabular or large strings
             const chunks = chunker.chunk(processedText);
             
-            return chunks.map(chunkText => ({
+            return chunks.map((chunkText, i) => ({
                 text: chunkText,
-                metadata: extraction.metadata
+                metadata: { ...extraction.metadata, position: `Paragraph ${i + 1}` }
             }));
         }
     }
@@ -83,10 +97,36 @@ export class UniversalLoader {
     async _extractPDF(filePath) {
         const dataBuffer = await fs.readFile(filePath);
         const parser = new PDFParse({ data: dataBuffer });
-        const data = await parser.getText();
+        
+        let pages = [];
+        try {
+            const data = await parser.getText();
+            // pdf-parse injects "-- X of Y --" at the end of each page
+            const rawText = data.text || '';
+            const splitted = rawText.split(/\n*\s*-- \d+ of \d+ --\s*\n*/);
+            
+            splitted.forEach((pageText, index) => {
+                if (pageText.trim()) {
+                    pages.push({ pageNumber: index + 1, text: pageText.trim() });
+                }
+            });
+
+            if (pages.length === 0) {
+                pages.push({ pageNumber: 1, text: rawText });
+            }
+        } catch (e) {
+            console.warn("[UniversalLoader] Failed to extract page-by-page:", e.message);
+            try {
+               const data = await parser.getText();
+               pages = [{ pageNumber: 1, text: data.text }];
+            } catch (fallbackErr) {
+               pages = [{ pageNumber: 1, text: '' }];
+            }
+        }
+        
         await parser.destroy();
         return {
-            content: data.text,
+            pages,
             metadata: {
                 source: filePath,
                 type: 'pdf',

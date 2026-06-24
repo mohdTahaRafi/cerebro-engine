@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { ingestDocument } from '../services/IngestionService.js';
 import { hybridSearch } from '../services/SearchService.js';
 import { processDocument as encodeText } from '../services/EncoderService.js';
+import { GenerationService } from '../services/GenerationService.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -61,7 +62,7 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
         await fs.rename(currentPath, newPath);
         currentPath = newPath; // Update reference for tracking
 
-        const result = await ingestDocument(currentPath);
+        const result = await ingestDocument(currentPath, req.file.originalname);
 
         // Cleanup ONLY on success
         await fs.unlink(currentPath);
@@ -111,6 +112,42 @@ app.post('/api/search', async (req, res) => {
     } catch (error) {
         console.error('Search error:', error);
         res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Ask Endpoint
+ * Generates an answer using local LLM based on retrieved context
+ */
+app.post('/api/ask', async (req, res) => {
+    try {
+        const { query } = req.body;
+        if (!query) {
+            return res.status(400).json({ error: "Query text is required." });
+        }
+
+        // 1. Set SSE headers for streaming
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // 2. Vectorize the query and perform Hybrid Search to get context
+        const encodingResult = await encodeText([query]);
+        const queryVector = encodingResult.vectorData;
+        const results = await hybridSearch(query, queryVector, null, 3); // Reduced from 10 to 3 to speed up CPU inference
+
+        // 3. Generate Answer via Ollama API
+        await GenerationService.generateStreamingResponse(query, results, (token) => {
+            res.write(`data: ${JSON.stringify({ token })}\n\n`);
+        });
+
+        res.write('data: [DONE]\n\n');
+        res.end();
+
+    } catch (error) {
+        console.error('Ask error:', error);
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        res.end();
     }
 });
 

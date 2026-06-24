@@ -3,10 +3,14 @@ import { ExecutionPlan } from '../components/core/ExecutionPlan';
 import { HardwareStats } from '../components/core/HardwareStats';
 import { ResultsTable } from '../components/core/ResultsTable';
 import { IngestionZone } from '../components/core/IngestionZone';
-import { useCerebroSearch } from '../hooks/useCerebroSearch';
-
+import { AnswerBox } from '../components/core/AnswerBox';
+import { useEngine } from '../context/EngineContext';
 export function CoreEngine() {
-  const { performSearch, telemetry, isSearching, error, isCircuitOpen, results } = useCerebroSearch();
+  const { performSearch, isSearching, results, telemetry, isCircuitOpen, error: searchError, answer, isGenerating, chatError } = useEngine();
+
+  const handleQuery = (query: string) => {
+    performSearch(query);
+  };
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -16,17 +20,21 @@ export function CoreEngine() {
       </div>
 
       {/* Left Sidebar: Query Console */}
-      <QueryConsole onSearch={performSearch} isSearching={isSearching} />
+      <QueryConsole onSearch={handleQuery} isSearching={isSearching || isGenerating} />
 
       {/* Center Pane: Execution Plan (Top) & Results Table (Bottom) */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#050505] relative">
         {/* Error / Circuit Breaker Safeguard Mode Alert */}
-        {(isCircuitOpen || error) && (
+        {(isCircuitOpen || searchError) && (
            <div className="absolute top-0 left-0 right-0 bg-[#FF003C] text-white font-bold p-3 text-center uppercase tracking-[0.2em] font-mono z-50 animate-pulse shadow-[0_0_20px_#FF003C]">
-              ⚠️ {isCircuitOpen ? 'SYSTEM ALERT' : 'NETWORK ERROR'}: {error} ⚠️
+              ⚠️ {isCircuitOpen ? 'SYSTEM ALERT' : 'NETWORK ERROR'}: {searchError} ⚠️
            </div>
         )}
         <ExecutionPlan telemetry={telemetry} />
+        
+        {/* Generative Answer Box */}
+        <AnswerBox answer={answer} isGenerating={isGenerating} error={chatError} />
+
         <ResultsTable results={results} />
       </div>
 

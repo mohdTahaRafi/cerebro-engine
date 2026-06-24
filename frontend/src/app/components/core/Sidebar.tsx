@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router';
-import { Terminal, Database, ShieldCheck, Activity, Box } from 'lucide-react';
+import { Terminal, Database, ShieldCheck, Activity, Box, MessageSquare } from 'lucide-react';
 
 export function Sidebar() {
   return (
@@ -12,7 +12,8 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-col gap-4 w-full px-2">
-          <NavItem to="/" icon={<Terminal size={20} />} label="Core" />
+          <NavItem to="/" icon={<MessageSquare size={20} />} label="Consumer Chat" />
+          <NavItem to="/advanced" icon={<Terminal size={20} />} label="Advanced Trace" />
           <NavItem to="/ingestion" icon={<Database size={20} />} label="Ingestion" />
           <NavItem to="/reliability" icon={<ShieldCheck size={20} />} label="Reliability" />
           <NavItem to="/vector" icon={<Box size={20} />} label="Vector Map" />

@@ -11,7 +11,7 @@ const loader = new UniversalLoader();
  * @param {string} inputSource - File path or URL
  * @returns {Promise<Object>} Status of the ingestion
  */
-export async function ingestDocument(inputSource) {
+export async function ingestDocument(inputSource, originalName = null) {
     console.log(`[IngestionService] Starting ingestion for: ${inputSource}`);
     const startTime = Date.now();
 
@@ -41,6 +41,7 @@ export async function ingestDocument(inputSource) {
                 vector: vector,
                 metadata: {
                     ...chunk.metadata,
+                    fileName: originalName || inputSource,
                     chunkIndex: i,
                     timestamp: new Date()
                 }

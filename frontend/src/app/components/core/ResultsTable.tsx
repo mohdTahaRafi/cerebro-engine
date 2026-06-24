@@ -1,11 +1,15 @@
 import { Table2, Download, Copy } from 'lucide-react';
 
 interface SearchResult {
-  documentId: string;
-  content: string;
+  documentId?: string;
+  _id?: string;
+  content?: string;
+  text?: string;
   fileName?: string;
+  source?: string;
   textChunk?: string;
-  similarity: number;
+  similarity?: number;
+  rrfScore?: number;
 }
 
 interface ResultsTableProps {
@@ -40,16 +44,16 @@ export function ResultsTable({ results = [] }: ResultsTableProps) {
                </tr>
              )}
              {results.map((r, i) => (
-               <tr key={r.documentId} className="border-b border-[#222] hover:bg-[#111] transition-colors group cursor-default">
+               <tr key={r._id || r.documentId || i} className="border-b border-[#222] hover:bg-[#111] transition-colors group cursor-default">
                  <td className="py-2.5 px-4 text-gray-600 font-bold group-hover:text-white">#{i + 1}</td>
                  <td className="py-2.5 px-4">
-                   <span className="text-[#00FF41] text-[10px] font-bold uppercase bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/20">{r.fileName || r.documentId}</span>
+                   <span className="text-[#00FF41] text-[10px] font-bold uppercase bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/20">{r.fileName || r.source || r.documentId || r._id || 'Unknown'}</span>
                  </td>
-                 <td className="py-2.5 px-4 text-gray-400 max-w-[300px] leading-relaxed">
-                   {r.textChunk?.slice(0, 120) || r.content || '—'}
+                 <td className="py-3 px-4 text-gray-400 max-w-2xl leading-relaxed text-[11px] whitespace-pre-wrap">
+                   {r.textChunk || r.content || r.text || '—'}
                  </td>
                  <td className="py-2.5 px-4 text-right">
-                   <span className="text-[#00FF41] font-bold font-mono bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/30">{r.similarity.toFixed(6)}</span>
+                   <span className="text-[#00FF41] font-bold font-mono bg-[#00FF41]/10 px-2 py-1 border border-[#00FF41]/30">{(r.rrfScore || r.similarity || 0).toFixed(6)}</span>
                  </td>
                </tr>
              ))}

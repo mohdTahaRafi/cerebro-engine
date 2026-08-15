@@ -147,3 +147,26 @@ storybook-static/
 
 # Sentry
 .sentryclirc
+
+
+# ----------------------------------------------------------------------------
+# Cerebro — runtime data (never commit uploaded/generated documents)
+# ----------------------------------------------------------------------------
+
+# Content-addressed uploaded source files (backend/src/api/documents.js) and
+# generated page images (Phase 4) / StorageAdapter filesystem driver output.
+backend/storage/
+backend/uploads/
+
+# ColPali weights and other HF model caches, if ever synced outside the named
+# Docker volume onto the host filesystem.
+.cache/huggingface/
+
+
+# ----------------------------------------------------------------------------
+# Python (vision/)
+# ----------------------------------------------------------------------------
+
+__pycache__/
+*.pyc
+*.pyo

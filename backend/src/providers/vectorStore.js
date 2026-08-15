@@ -1,0 +1,219 @@
+import { QdrantClient } from '@qdrant/js-client-rest';
+import { v5 as uuidv5 } from 'uuid';
+import { config } from '../config/index.js';
+import { wrap } from './breaker.js';
+
+let _client = null;
+
+export function client() {
+  if (_client) return _client;
+  _client = new QdrantClient({
+    url: config.qdrant.url,
+    apiKey: config.qdrant.apiKey,
+    // The server is deliberately pinned to v1.12.4 (docker-compose.yml); the client
+    // SDK tracks npm's latest and will usually be newer. The basic CRUD surface this
+    // adapter uses (collections, payload indexes, points) is stable across that gap —
+    // verified live against v1.12.4 — so the compatibility warning is noise, not risk.
+    checkCompatibility: false,
+  });
+  return _client;
+}
+
+async function pingRaw() {
+  await client().getCollections();
+}
+
+// architecture §6.1: qdrant breaker timeout — ANN query is ~20ms; a 5s breach means
+// the node is unhealthy, not slow.
+const qdrantBreaker = wrap('qdrant', (...args) => pingRaw(...args), { timeout: 5_000 });
+
+export async function ping() {
+  return qdrantBreaker.fire();
+}
+
+// Phase 2: a second breaker, same 5s timeout, for the chunk read/write operations added
+// this phase. Kept distinct from `qdrantBreaker` above (name 'qdrant') because that one is
+// hardwired to `pingRaw` — opossum's `wrap()` memoizes the wrapped function by name on
+// first call, so reusing the name would silently make every upsert/delete just re-run the
+// health ping instead of the real operation.
+const qdrantOpBreaker = wrap('qdrant.chunks', (fn) => fn(), { timeout: 5_000 });
+
+// ── Collection schema (architecture §4, phase 1 §4) ─────────────────────────
+
+const CHUNKS_SCHEMA = {
+  vectors: {
+    dense: {
+      size: 1024,                    // embed-multilingual-v3.0 output width
+      distance: 'Cosine',            // Cohere v3 vectors are not unit-normalized; Cosine, not Dot
+      on_disk: false,                // 100k × 1024 × 4B = 410 MB — fits RAM, keep it hot
+    },
+  },
+  sparse_vectors: {
+    // modifier: 'idf' — Amended during Phase 2 implementation (architecture §5.12): Qdrant
+    // computes real BM25 (IDF + length normalization) server-side from raw term-frequency
+    // counts when this is set; the client (providers/bm25.js) only ever sends counts.
+    sparse: { index: { on_disk: false }, modifier: 'idf' },
+  },
+  optimizers_config: {
+    default_segment_number: 2,       // 2 segments on a dev-scale corpus; more adds merge overhead
+  },
+  hnsw_config: {
+    m: 16,                           // Qdrant default; recall ≈0.97 at this corpus size
+    ef_construct: 128,               // build-time candidate width; 128 balances build time vs recall
+  },
+};
+
+const PAGES_SCHEMA = {
+  vectors: {
+    colpali: {
+      size: 128,                     // ColPali v1.3 per-patch vector width
+      distance: 'Cosine',
+      multivector_config: { comparator: 'max_sim' },   // late interaction — mandatory for ColPali
+      quantization_config: {
+        scalar: { type: 'int8', quantile: 0.99, always_ram: true },
+      },
+      on_disk: true,                 // raw fp32 multivectors to disk; int8 copies stay in RAM
+    },
+  },
+};
+
+const PAYLOAD_INDEXES = ['documentId', 'contentHash'];
+
+// Compares only the fields that determine correctness (dimension, distance, multivector
+// comparator, quantization type, sparse modifier). A mismatch here means points would be
+// silently scored against the wrong metric or dimensionality — exactly the "unversioned
+// Atlas index" failure this script exists to prevent.
+function diffVectorConfig(name, existing, expected) {
+  const diffs = [];
+  for (const [vectorName, expectedVec] of Object.entries(expected.vectors)) {
+    const existingVec = existing?.[vectorName];
+    if (!existingVec) {
+      diffs.push(`vector "${vectorName}" is missing`);
+      continue;
+    }
+    if (existingVec.size !== expectedVec.size) {
+      diffs.push(`vector "${vectorName}" size: expected ${expectedVec.size}, got ${existingVec.size}`);
+    }
+    const existingDistance = String(existingVec.distance ?? '').toLowerCase();
+    const expectedDistance = String(expectedVec.distance).toLowerCase();
+    if (existingDistance !== expectedDistance) {
+      diffs.push(`vector "${vectorName}" distance: expected ${expectedVec.distance}, got ${existingVec.distance}`);
+    }
+    if (expectedVec.multivector_config) {
+      const existingComparator = existingVec.multivector_config?.comparator;
+      if (existingComparator !== expectedVec.multivector_config.comparator) {
+        diffs.push(
+          `vector "${vectorName}" multivector comparator: expected ${expectedVec.multivector_config.comparator}, got ${existingComparator ?? 'none'}`,
+        );
+      }
+    }
+    if (expectedVec.quantization_config) {
+      const existingType = existingVec.quantization_config?.scalar?.type;
+      const expectedType = expectedVec.quantization_config.scalar.type;
+      if (existingType !== expectedType) {
+        diffs.push(`vector "${vectorName}" quantization: expected ${expectedType}, got ${existingType ?? 'none'}`);
+      }
+    }
+  }
+  if (expected.sparse_vectors) {
+    for (const [sparseName, expectedSparse] of Object.entries(expected.sparse_vectors)) {
+      const existingSparse = existing.sparse_vectors?.[sparseName] ?? existing[sparseName];
+      if (!existingSparse) {
+        // Qdrant reports sparse vectors under a separate key in getCollection's response;
+        // treat either shape as satisfying the check.
+        diffs.push(`sparse vector "${sparseName}" is missing`);
+        continue;
+      }
+      const existingModifier = existingSparse.modifier ?? 'none';
+      const expectedModifier = expectedSparse.modifier ?? 'none';
+      if (existingModifier !== expectedModifier) {
+        diffs.push(`sparse vector "${sparseName}" modifier: expected ${expectedModifier}, got ${existingModifier}`);
+      }
+    }
+  }
+  return diffs.length > 0 ? { name, diffs } : null;
+}
+
+async function ensureCollection(name, schema) {
+  const { collections } = await client().getCollections();
+  const exists = collections.some((c) => c.name === name);
+
+  if (!exists) {
+    await client().createCollection(name, schema);
+    console.log(`[setup-qdrant] created "${name}"`);
+    return { created: true };
+  }
+
+  const info = await client().getCollection(name);
+  const existingVectors = info.config?.params?.vectors ?? {};
+  const existingSparse = info.config?.params?.sparse_vectors ?? {};
+  const mismatch = diffVectorConfig(name, { ...existingVectors, sparse_vectors: existingSparse }, schema);
+  if (mismatch) {
+    throw new Error(
+      `Collection "${name}" already exists with a mismatched config:\n  ${mismatch.diffs.join('\n  ')}`,
+    );
+  }
+  console.log(`[setup-qdrant] "${name}" already exists, config matches`);
+  return { created: false };
+}
+
+export async function ensureCollections() {
+  const chunks = await ensureCollection(config.qdrant.chunksCollection, CHUNKS_SCHEMA);
+  const pages = await ensureCollection(config.qdrant.pagesCollection, PAGES_SCHEMA);
+
+  for (const collection of [config.qdrant.chunksCollection, config.qdrant.pagesCollection]) {
+    for (const field of PAYLOAD_INDEXES) {
+      await client().createPayloadIndex(collection, { field_name: field, field_schema: 'keyword' });
+    }
+  }
+
+  return { chunks, pages };
+}
+
+// ── Phase 2: chunk upsert / delete ───────────────────────────────────────────
+
+// Fixed namespace UUID for uuidv5 point-id derivation. Any valid UUID works as a
+// namespace — what matters is that it never changes across runs, since re-ingesting the
+// same document must land on the same point ids every time (task 2.14).
+const NAMESPACE = 'bd3ef651-79c8-48e5-811d-5f151ecd9b2c';
+
+export async function upsertChunks(chunks, denseVectors, sparseVectors) {
+  const points = chunks.map((chunk, i) => ({
+    // Deterministic UUIDv5 from (documentId, position). Re-ingesting the same document
+    // overwrites the same point ids instead of duplicating — this is what makes
+    // FR-DOC-03 (re-ingest replaces) work without a delete-then-insert race.
+    id: uuidv5(`${chunk.documentId}:${chunk.position}`, NAMESPACE),
+    vector: { dense: denseVectors[i], sparse: sparseVectors[i] },
+    payload: chunk,
+  }));
+
+  for (let i = 0; i < points.length; i += 256) {
+    const batch = points.slice(i, i + 256);
+    await qdrantOpBreaker.fire(() => client().upsert(config.qdrant.chunksCollection, {
+      wait: true,                       // block until indexed, so 'ready' means queryable
+      points: batch,
+    }));
+  }
+}
+
+export async function deleteByDocument(documentId) {
+  const before = await client().count(config.qdrant.chunksCollection, {
+    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    exact: true,
+  }).catch(() => ({ count: 0 }));   // collection may not exist yet on a very first call
+
+  await qdrantOpBreaker.fire(() => client().delete(config.qdrant.chunksCollection, {
+    wait: true,
+    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+  }));
+
+  return { deletedPoints: before.count };
+}
+
+export async function countByDocument(documentId) {
+  const { count } = await client().count(config.qdrant.chunksCollection, {
+    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    exact: true,
+  });
+  return count;
+}

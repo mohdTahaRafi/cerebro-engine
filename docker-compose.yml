@@ -1,0 +1,74 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"   # HTTP/REST + dashboard at /dashboard
+      - "6334:6334"   # gRPC — exposed for tooling only; the Node client is REST-only
+                      # and uses :6333. See architecture §5.11.
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__STORAGE__QUANTIZATION__ALWAYS_RAM: "true"
+    healthcheck:
+      # Qdrant has no curl/wget in the image; use its own TCP readiness via bash
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  vision:
+    build: ./vision
+    ports:
+      - "8100:8100"
+    volumes:
+      - hf_cache:/root/.cache/huggingface   # persist ColPali weights across rebuilds
+      - ./storage/pages:/storage/pages       # page images written here, read by Node
+    environment:
+      COLPALI_MODEL: vidore/colpali-v1.3
+      COLPALI_DEVICE: cpu
+      PAGE_STORAGE_DIR: /storage/pages
+      OMP_NUM_THREADS: "4"
+      # huggingface_hub's newer chunk-transfer ("Xet") protocol was observed live to
+      # stall permanently mid-download in this environment — the client kept emitting
+      # transfer telemetry while the actual blob file stopped growing for 1h46m
+      # (verified: identical byte count and mtime across repeated checks). Forcing
+      # single-stream LFS/HTTP downloads instead, which is the documented fallback.
+      HF_HUB_DISABLE_XET: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 20          # 20 × 15s = 5 min; first boot downloads ~3 GB of ColPali weights
+      start_period: 120s
+
+volumes:
+  qdrant_data:
+  mongo_data:
+  redis_data:
+  hf_cache:

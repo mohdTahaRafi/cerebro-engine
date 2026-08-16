@@ -19,7 +19,8 @@
     "test:merge": "node test/vision/merge.test.js",
     "test:classifier": "node test/vision/classifier.test.js",
     "test:visual-retrieval": "node test/vision/visual-retrieval.test.js",
-    "test:vision": "npm run test:merge && npm run test:classifier && npm run test:visual-retrieval"
+    "test:vision": "npm run test:merge && npm run test:classifier && npm run test:visual-retrieval",
+    "test:graph": "node test/graph/state.test.js && node test/graph/routing.test.js && node test/graph/condense.test.js && node test/graph/sse.test.js"
   },
   "keywords": [],
   "author": "",

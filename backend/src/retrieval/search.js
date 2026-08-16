@@ -41,7 +41,12 @@ function emptyResult(reason, t, extra = {}) {
 // OCR that merge.js may or may not have absorbed into a page this query. An OCR chunk that
 // survives merge.js unabsorbed (its page wasn't itself retrieved by the ColPali branch)
 // has no image to show and correctly displays as an ordinary text result.
-function toPublicResult(r) {
+//
+// Exported (phase 5 §6, §7.2): the graph's rerank node reuses this exact projection to
+// populate RagState.sources, so the objects the generation prompt is built from and the
+// objects /api/search returns are the same shape — one place decides what a "source"
+// looks like to anything outside the retrieval pipeline.
+export function toPublicResult(r) {
   const isPage = r.sourceKind === 'page';
   return {
     pointId: r.pointId,
@@ -115,15 +120,12 @@ const tracedRerank = traceable(
   { name: 'rerank', run_type: 'chain', client: getTracingClient() },
 );
 
-async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } = {}) {
-  const t = createTimer();
-
-  const query = normalize(rawQuery);
-  // normalize() trims and collapses whitespace but does not strip punctuation, so this
-  // only fires for a whitespace-only (or empty) input — a punctuation-only query like
-  // "..." survives normalization and is searched as real (if low-value) query text.
-  if (!query) return emptyResult('empty_query', t);
-
+// Steps 1-3 of the pipeline (encode -> retrieve -> merge), factored out so the graph's
+// retrieveNode (phase 5 §6) can share the exact same encode/retrieve logic instead of
+// reimplementing the concurrent dense+sparse+ColPali calls. Takes the caller's timer
+// rather than owning one, so runSearch below keeps reporting one continuous set of marks
+// across the whole pipeline (retrieval + rerank) the way it always has.
+async function retrieveStage(query, documentIds, t) {
   // 1. Encode query — dense (Cohere API), sparse (local BM25), and ColPali multivector
   //    (vision service) all run concurrently. All three are independent network/local
   //    calls; serializing any of them would only add its latency to the others' critical
@@ -161,6 +163,37 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
           })
       : Promise.resolve([]),
   ]);
+
+  return { chunkCandidates, pageCandidates };
+}
+
+// Phase 5 §6: the graph's retrieveNode calls this directly. Owns its own timer (the graph
+// tracks its own per-node timing separately via performance.now() in retrieveNode) and
+// returns exactly `{ candidates, timings }` — no rerank, no relevance floor, no empty-state
+// classification. rerankNode owns emptiness (a candidates.length === 0 check plus its own
+// countPoints call) so this function's contract stays a plain "give me ranked-by-fusion
+// candidates," reusable outside the /api/search response envelope.
+export const retrieveCandidates = traceable(
+  async function retrieveCandidates(rawQuery, { documentIds = null } = {}) {
+    const t = createTimer();
+    const query = normalize(rawQuery);
+    const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
+    const candidates = mergeByProvenance(chunkCandidates, pageCandidates);
+    return { candidates, timings: t.report() };
+  },
+  { name: 'retrieveCandidates', run_type: 'chain', client: getTracingClient() },
+);
+
+async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } = {}) {
+  const t = createTimer();
+
+  const query = normalize(rawQuery);
+  // normalize() trims and collapses whitespace but does not strip punctuation, so this
+  // only fires for a whitespace-only (or empty) input — a punctuation-only query like
+  // "..." survives normalization and is searched as real (if low-value) query text.
+  if (!query) return emptyResult('empty_query', t);
+
+  const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
 
   if (chunkCandidates.length === 0 && pageCandidates.length === 0) {
     const corpusSize = await vectorStore.countPoints(documentIds);

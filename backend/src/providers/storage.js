@@ -39,6 +39,16 @@ async function del(key) {
 }
 export { del as delete };
 
+// Phase 5 §7.2: buildUserMessage attaches page images by the ROUTE path a source carries
+// (`/api/pages/<documentId>/<page>.jpg`, toPublicResult's imageUri — see retrieval/search.js),
+// not the raw storage key. The mapping back to a storage key is exactly pages.js's own
+// `pages/${documentId}/${page}.jpg` construction run in reverse.
+export async function readBase64(imageUri) {
+  const key = imageUri.replace(/^\/api\/pages\//, 'pages/');
+  const buf = await get(key);
+  return buf.toString('base64');
+}
+
 export async function exists(key) {
   try {
     await fs.access(resolveKey(key));

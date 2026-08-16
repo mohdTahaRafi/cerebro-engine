@@ -3,11 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import { randomUUID } from 'crypto';
 import { ingestDocument } from '../services/IngestionService.js';
-import { hybridSearch } from '../services/SearchService.js';
-import { processDocument as encodeText } from '../services/EncoderService.js';
-import { GenerationService } from '../services/GenerationService.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -15,11 +11,12 @@ import { fileURLToPath } from 'url';
 
 import { config } from '../config/index.js';
 import { initTracing } from '../telemetry/tracing.js';
-import { pingGraph } from '../graph/pingGraph.js';
 import healthRouter from './routes/health.js';
 import documentsRouter from './routes/documents.js';
 import searchRouter from './routes/search.js';
 import pagesRouter from './routes/pages.js';
+import askRouter from './routes/ask.js';
+import threadsRouter from './routes/threads.js';
 import { startWorker } from '../ingestion/queue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,29 +92,18 @@ app.use(documentsRouter);
 
 // Phase 3: hybrid retrieval + reranking, mounted at the same /api/search path the legacy
 // MongoDB-backed handler used to serve (removed here; SearchService.js itself stays on
-// disk, still used by /api/ask below, until Phase 6 decommissions it — phase 3 §8).
+// disk, unused by any route as of Phase 5, until Phase 6 deletes it — phase 3 §8).
 app.use(searchRouter);
 
 // Phase 4: serves rendered scanned-page JPEGs referenced by /api/search's `imageUri`.
 app.use(pagesRouter);
 
-/**
- * Ping Graph — THROWAWAY (phase 1 §9.2). Proves the LangGraph runtime and the
- * LangSmith tracing pipeline both work before Phase 5's real graph depends on them.
- * Deleted in Phase 5 along with pingGraph.js.
- */
-app.post('/api/graph/ping', async (req, res, next) => {
-    try {
-        const runId = randomUUID();
-        const result = await pingGraph.invoke(
-            { input: req.body?.input ?? '' },
-            { runId, runName: 'pingGraph' },
-        );
-        res.json({ output: result.output, steps: result.steps, runId });
-    } catch (err) {
-        next(err);
-    }
-});
+// Phase 5: the real graph (LangGraph state machine — condense, retrieve, rerank,
+// generate) replaces both the throwaway pingGraph proof-of-concept (deleted along with
+// pingGraph.js and its /api/graph/ping route, phase 1 §9.2) and the legacy inline
+// /api/ask handler below (removed here — same path, new SSE envelope, thread-aware).
+app.use(askRouter);
+app.use(threadsRouter);
 
 /**
  * Ingestion Endpoint
@@ -155,50 +141,6 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
             error: error.message, 
             message: "Ingestion failed. Temporary file has been kept on the server for retry."
         });
-    }
-});
-
-/**
- * Ask Endpoint
- * Generates an answer using local LLM based on retrieved context
- */
-app.post('/api/ask', async (req, res) => {
-    try {
-        const { query, scopeSources } = req.body;
-        if (!query) {
-            return res.status(400).json({ error: "Query text is required." });
-        }
-
-        // 1. Set SSE headers for streaming
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-
-        // 2. Vectorize the query and perform Hybrid Search to get context
-        const encodingResult = await encodeText([query]);
-        const queryVector = encodingResult.vectorData;
-        // Reduced from 10 to 3 to speed up CPU inference. scopeSources, when the user has a
-        // file currently attached, restricts grounding to that file instead of the whole
-        // knowledge base — see SearchService.hybridSearch's sourceFilter param.
-        const results = await hybridSearch(query, queryVector, null, 3, {}, scopeSources);
-
-        // Send the real chunks the LLM is about to be grounded on, so the frontend can
-        // show citations that actually match this answer instead of a separate, independent
-        // /api/search call (which used a different top-K and could disagree with the LLM's context).
-        res.write(`data: ${JSON.stringify({ sources: results })}\n\n`);
-
-        // 3. Generate Answer via Ollama API
-        await GenerationService.generateStreamingResponse(query, results, (token) => {
-            res.write(`data: ${JSON.stringify({ token })}\n\n`);
-        });
-
-        res.write('data: [DONE]\n\n');
-        res.end();
-
-    } catch (error) {
-        console.error('Ask error:', error);
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-        res.end();
     }
 });
 

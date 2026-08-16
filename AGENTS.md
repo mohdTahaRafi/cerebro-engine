@@ -67,6 +67,11 @@ LlamaParse credits. Its offline-only subset is `SKIP_LLAMAPARSE=1 node
 test/ingestion/parser.test.js` plus the normalize/chunker scripts, which need nothing
 running. The lifecycle test writes and then deletes real Mongo rows and Qdrant points.
 
+Only `test/ingestion/lifecycle.test.js` requires a live backend; the other three are
+pure-function or parser-level and need no server. If a sandboxed/automated environment
+reaps background processes between commands, start the server and run that one test in a
+single shell invocation rather than expecting a previously-launched server to persist.
+
 `npm test` and the phase scripts create temporary files; database scripts may insert/delete MongoDB data; the loader test may fetch a remote PDF. Run them only with permission and suitable local test data. The frontend has `npm run build`, but no configured unit-test, lint, or type-check script.
 
 ## Technical constraints

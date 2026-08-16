@@ -18,6 +18,8 @@ import { config } from '../config/index.js';
 import { initTracing } from '../telemetry/tracing.js';
 import { pingGraph } from '../graph/pingGraph.js';
 import healthRouter from './routes/health.js';
+import documentsRouter from './routes/documents.js';
+import { startWorker } from '../ingestion/queue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const upload = multer({ dest: 'uploads/' });
@@ -35,9 +37,43 @@ initTracing();
 mongoose.connect(config.mongo.uri)
     .then(() => {
         console.log('[CEREBRO] MongoDB Connected');
-        app.listen(PORT, () => {
-            console.log(`[CEREBRO] Backend Online at http://localhost:${PORT}`);
-            console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
+        // Phase 2: bind the port BEFORE starting the ingest worker. Ordering matters —
+        // an instance that cannot bind must not consume the queue. Without this, a second
+        // `node src/api/index.js` (a stale process, a duplicate `npm run dev`) silently
+        // ran its own BullMQ worker against the same Redis queue while serving no HTTP at
+        // all, doubling effective ingest concurrency to 4 with nothing in the logs to say
+        // so. Observed live: architecture §6's "exactly 2 concurrent" budget measured as 4
+        // until the orphan was found and killed.
+        let bindFailed = false;
+
+        const server = app.listen(PORT, () => {
+            // Everything here is deliberately deferred rather than run inline. Verified
+            // live that on this dual-stack host the 'listening' callback can fire *before*
+            // an EADDRINUSE 'error' event on the same server, so "do it inside the
+            // callback" is not on its own a guarantee that a losing instance stays out of
+            // the queue — nor that it should announce itself as online. A short defer lets
+            // the error settle first; EADDRINUSE surfaces immediately, so 100ms is ample
+            // and is paid once at startup.
+            setTimeout(() => {
+                if (bindFailed) return;
+                console.log(`[CEREBRO] Backend Online at http://localhost:${PORT}`);
+                console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
+                startWorker();
+                console.log('[CEREBRO] Ingest worker started (concurrency 2)');
+            }, 100);
+        });
+
+        server.on('error', (err) => {
+            bindFailed = true;
+            if (err.code === 'EADDRINUSE') {
+                console.error(
+                    `[CEREBRO] Port ${PORT} is already in use — another backend instance is running. ` +
+                    `Exiting rather than starting a duplicate ingest worker against the same queue.`,
+                );
+            } else {
+                console.error('[CEREBRO] HTTP server error:', err);
+            }
+            process.exit(1);
         });
     })
     .catch(err => {
@@ -50,6 +86,11 @@ mongoose.connect(config.mongo.uri)
 // probes (phase 1 §8). Not one of the routes phase 1 §1 promises to keep untouched
 // (only /api/ingest, /api/search, /api/ask are legacy-frozen).
 app.use(healthRouter);
+
+// Phase 2: new document-lifecycle API (upload → async ingest → ready), independent of the
+// legacy /api/ingest below. Both write different stores (Qdrant here, MongoDB legacy) so
+// they coexist without conflict until Phase 6 decommissions the legacy path.
+app.use(documentsRouter);
 
 /**
  * Ping Graph — THROWAWAY (phase 1 §9.2). Proves the LangGraph runtime and the
@@ -101,8 +142,8 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
     } catch (error) {
         console.error(`[Ingestion Error] Failure. File preserved at: ${currentPath}`);
         console.error(error);
-        res.status(500).json({
-            error: error.message,
+        res.status(500).json({ 
+            error: error.message, 
             message: "Ingestion failed. Temporary file has been kept on the server for retry."
         });
     }

@@ -1,6 +1,7 @@
 import { CohereClient } from 'cohere-ai';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
+import { encodeSparse as bm25EncodeSparse } from './bm25.js';
 
 let _client = null;
 
@@ -14,8 +15,6 @@ function client() {
 // without holding a worker.
 export const embedBreaker = wrap('cohere.embed', (req) => client().embed(req), { timeout: 10_000 });
 
-// Phase 1 only implements ping(). encodeDocuments() lands in Phase 2,
-// encodeQuery() in Phase 3 — see architecture §6 adapter table.
 export async function ping() {
   await embedBreaker.fire({
     model: config.cohere.embedModel,
@@ -24,3 +23,35 @@ export async function ping() {
     embeddingTypes: ['float'],
   });
 }
+
+// ── Phase 2: real embedding ──────────────────────────────────────────────────
+
+const BATCH_SIZE = 96;   // Cohere's per-request texts cap for embed v3
+
+// inputType: 'search_document' here vs 'search_query' at query time (Phase 3) is the
+// asymmetry the old MiniLM path had no mechanism for — Cohere v3 trains the two input
+// types into different regions of the space (architecture §6).
+export async function encodeDocuments(texts) {
+  const vectors = [];
+  let totalTokens = 0;
+
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE);
+    const res = await embedBreaker.fire({
+      model: config.cohere.embedModel,
+      texts: batch,
+      inputType: 'search_document',
+      embeddingTypes: ['float'],
+      truncate: 'END',   // belt-and-braces; the chunker already fits the token budget
+    });
+    vectors.push(...res.embeddings.float);
+    totalTokens += res.meta?.billedUnits?.inputTokens ?? 0;
+  }
+  return { vectors, totalTokens };
+}
+
+// BM25 sparse encoding — architecture §5.12, phase 2 §6.2 (local tokenizer, not FastEmbed;
+// the npm `fastembed` package has no BM25 model). Re-exported here so ingestDocument.js
+// has one `embeddings` module for both dense and sparse, matching the spec's job-handler
+// shape even though the sparse implementation lives in its own file.
+export const encodeSparse = bm25EncodeSparse;

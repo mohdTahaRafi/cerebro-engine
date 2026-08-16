@@ -1,0 +1,7 @@
+{
+  "title": "Phase 2 Fixture",
+  "items": [
+    { "name": "Widget", "count": 12 },
+    { "name": "Gadget", "count": 7 }
+  ]
+}

@@ -15,7 +15,11 @@
     "test:encode-query": "node test/providers/encodeQuery.test.js",
     "test:ingestion": "node test/ingestion/normalize.test.js && node test/ingestion/chunker.test.js && node test/ingestion/parser.test.js && node test/ingestion/lifecycle.test.js",
     "test:corpus:setup": "QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/setup-corpus.js",
-    "test:retrieval": "QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/regression.test.js && QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/floor.test.js && QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/scoping.test.js"
+    "test:retrieval": "QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/regression.test.js && QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/floor.test.js && QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test node test/retrieval/scoping.test.js",
+    "test:merge": "node test/vision/merge.test.js",
+    "test:classifier": "node test/vision/classifier.test.js",
+    "test:visual-retrieval": "node test/vision/visual-retrieval.test.js",
+    "test:vision": "npm run test:merge && npm run test:classifier && npm run test:visual-retrieval"
   },
   "keywords": [],
   "author": "",

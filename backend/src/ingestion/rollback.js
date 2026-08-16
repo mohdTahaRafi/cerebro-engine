@@ -5,5 +5,6 @@ import * as storage from '../providers/storage.js';
 // the failure happened mid-upsert. The documentId payload index makes this fast (NFR-REL-03).
 export async function rollbackDocument(documentId) {
   await vectorStore.deleteByDocument(documentId);
-  await storage.deletePrefix(`pages/${documentId}/`);   // no-op until Phase 4
+  await vectorStore.deletePagesByDocument(documentId);   // phase 4: was a no-op collection until now
+  await storage.deletePrefix(`pages/${documentId}/`);
 }

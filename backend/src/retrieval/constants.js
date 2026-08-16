@@ -29,3 +29,9 @@ export const MAX_QUERY_CHARS = 4_000;
 export const TOP_N_DEFAULT = 8;
 export const TOP_N_MIN = 1;
 export const TOP_N_MAX = 25;
+
+// Phase 4 (§7.1): the ColPali branch's candidate width. A page is roughly 5-8 chunks'
+// worth of content, so 10 pages and FUSION_LIMIT's 50 chunks contribute comparable
+// volumes of material to the reranker while keeping the combined candidate set at the
+// 50-60 the reranker is budgeted for (§4.2).
+export const PAGE_FUSION_LIMIT = 10;

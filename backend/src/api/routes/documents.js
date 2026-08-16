@@ -134,6 +134,7 @@ router.post('/api/documents/:id/reingest', async (req, res, next) => {
 
     await doc.updateOne({
       status: 'queued', progress: 0, error: null, chunkCount: 0, pageCount: 0,
+      textPageCount: 0, visualPageCount: 0, warnings: [],
     });
     try {
       await ingestQueue.add('ingest:document', { documentId: doc._id.toString() }, JOB_OPTS);
@@ -157,6 +158,7 @@ router.delete('/api/documents/:id', async (req, res, next) => {
     // in the list and can be retried; the reverse ordering would orphan points with no
     // registry row pointing at them — unreachable garbage that nothing would ever clean up.
     const { deletedPoints } = await vectorStore.deleteByDocument(doc._id.toString());
+    const { deletedPoints: deletedPagePoints } = await vectorStore.deletePagesByDocument(doc._id.toString());
     await storage.deletePrefix(`pages/${doc._id}/`);
     await fs.unlink(doc.storagePath).catch(() => {});   // may be shared by a duplicate row
     await Document.updateMany(
@@ -165,7 +167,7 @@ router.delete('/api/documents/:id', async (req, res, next) => {
     );
     await doc.deleteOne();
 
-    res.json({ deleted: true, documentId: doc._id, deletedPoints });
+    res.json({ deleted: true, documentId: doc._id, deletedPoints, deletedPagePoints });
   } catch (err) {
     next(err);
   }

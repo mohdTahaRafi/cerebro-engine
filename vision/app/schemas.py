@@ -10,5 +10,50 @@ class HealthResponse(BaseModel):
     uptimeSeconds: float
 
 
-# Request/response models for /classify and /embed_pages land in Phase 4 —
-# see phase 4 §2.3 and §5.3. Both endpoints are 501 stubs until then.
+# ── Phase 4: /classify (§2.3) ────────────────────────────────────────────────────────
+
+class PageVerdict(BaseModel):
+    page: int
+    kind: str          # "text" | "visual"
+    charCount: int
+    imageCoverage: float
+    reason: str
+
+
+class ClassifyResponse(BaseModel):
+    pageCount: int
+    textPages: list[int]
+    visualPages: list[int]
+    pages: list[PageVerdict]
+    elapsedMs: int
+
+
+# ── Phase 4: /embed_pages (§5.3) ─────────────────────────────────────────────────────
+
+class EmbedPageResult(BaseModel):
+    page: int
+    imageUri: str
+    widthPx: int
+    heightPx: int
+    ocrText: str
+    ocrQuality: str        # "good" | "poor"
+    meanConfidence: float
+    wordCount: int
+    multivector: list[list[float]]
+    patchCount: int
+
+
+class EmbedPagesResponse(BaseModel):
+    pages: list[EmbedPageResult]
+    elapsedMs: int
+
+
+# ── Phase 4: /embed_query (§5.2, referenced by search.js in §7.1) ───────────────────
+
+class EmbedQueryRequest(BaseModel):
+    query: str
+
+
+class EmbedQueryResponse(BaseModel):
+    multivector: list[list[float]]
+    elapsedMs: int

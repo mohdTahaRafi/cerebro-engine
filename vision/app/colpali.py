@@ -78,6 +78,45 @@ def is_ready() -> bool:
     return _model is not None
 
 
-# embed_pages() (batch 2) and embed_query() (process_queries) land in Phase 4 —
-# see architecture §5 / phase 4 §5. Phase 1 only proves the model loads and reports
-# readiness through /health.
+# ── Phase 4: page and query embedding (architecture §5, phase 4 §5) ─────────────────
+
+PAGE_BATCH_SIZE = 2   # set by memory, not throughput — see the batching comment below
+
+
+# @torch.inference_mode(), not @torch.no_grad(), on both functions below — it additionally
+# disables version counters and view tracking, cutting ~8% off CPU latency with no
+# behavioral difference for a pure forward pass.
+@torch.inference_mode()
+def embed_pages(images: list) -> list:
+    """ColPali multivector embedding, one entry per page (~1030 patches x 128 dims).
+
+    PAGE_BATCH_SIZE = 2 is set by memory, not throughput: ColPali holds ~4.5GB of fp32
+    weights, and each in-flight page adds ~1.1GB of activation for a 150-dpi input. Batch
+    2 keeps peak RSS under the 6GB budget from Phase 1 §13. Larger batches OOM the
+    container before they improve throughput, because CPU inference here is compute-bound
+    rather than launch-bound.
+    """
+    model, processor = load()
+    out = []
+    for i in range(0, len(images), PAGE_BATCH_SIZE):
+        batch = processor.process_images(images[i : i + PAGE_BATCH_SIZE])
+        batch = {k: v.to(model.device) for k, v in batch.items()}
+        emb = model(**batch)                      # (B, patches, 128)
+        out.extend(e.to(torch.float32).cpu().tolist() for e in emb)
+    return out
+
+
+@torch.inference_mode()
+def embed_query(query: str) -> list:
+    """ColPali is asymmetric structurally, not just by input-type flag: process_queries
+    applies a distinct prompt template and produces one vector per query *token*
+    (~15-25), while process_images produces one per image *patch* (~1030). MAX_SIM then
+    scores every query token against every patch and sums the per-token maxima. Feeding a
+    query through process_images does not error — it produces silently wrong vectors,
+    which is the worst kind of bug, so the two paths stay separate functions with no
+    shared entry point.
+    """
+    model, processor = load()
+    batch = processor.process_queries([query])    # NOT process_images — different template
+    batch = {k: v.to(model.device) for k, v in batch.items()}
+    return model(**batch)[0].to(torch.float32).cpu().tolist()   # (~20 tokens, 128)

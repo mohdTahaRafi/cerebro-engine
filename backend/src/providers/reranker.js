@@ -30,7 +30,17 @@ export async function ping() {
 // document and a chunk is ~1300 chars, so this only bites on Phase 4 OCR pages (§4.1).
 const RERANK_TEXT_CHARS = 4_000;
 
+// Phase 4 (§7.3): the reranker is text-only, so a page is represented by its OCR text.
+// Both kinds go into the same rerank call — this function is the single place their
+// scores become comparable, since after this everything is "the reranker's opinion of
+// this text passage" regardless of which collection it came from.
 function buildRerankText(c) {
+  if (c.sourceKind === 'page') {
+    const label = `[Scanned page ${c.page} of ${c.fileName}]`;
+    // Poor-OCR pages still get submitted — their identifiers often survive even when
+    // prose does not, and excluding them would make handwritten pages unrankable.
+    return `${label}\n\n${c.ocrText}`.slice(0, RERANK_TEXT_CHARS);
+  }
   const prefix = c.headingPath ? `${c.headingPath}\n\n` : '';
   return `${prefix}${c.text}`.slice(0, RERANK_TEXT_CHARS);
 }

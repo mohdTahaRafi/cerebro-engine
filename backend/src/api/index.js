@@ -19,6 +19,7 @@ import { pingGraph } from '../graph/pingGraph.js';
 import healthRouter from './routes/health.js';
 import documentsRouter from './routes/documents.js';
 import searchRouter from './routes/search.js';
+import pagesRouter from './routes/pages.js';
 import { startWorker } from '../ingestion/queue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,9 @@ app.use(documentsRouter);
 // MongoDB-backed handler used to serve (removed here; SearchService.js itself stays on
 // disk, still used by /api/ask below, until Phase 6 decommissions it — phase 3 §8).
 app.use(searchRouter);
+
+// Phase 4: serves rendered scanned-page JPEGs referenced by /api/search's `imageUri`.
+app.use(pagesRouter);
 
 /**
  * Ping Graph — THROWAWAY (phase 1 §9.2). Proves the LangGraph runtime and the

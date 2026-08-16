@@ -20,6 +20,10 @@ const DocumentSchema = new mongoose.Schema({
   chunkCount:   { type: Number, default: 0 },
   progress:     { type: Number, default: 0, min: 0, max: 100 },
   duplicateOf:  { type: mongoose.Schema.Types.ObjectId, ref: 'Document', default: null },
+  // Non-fatal ingestion issues (phase 4 §6.3) — e.g. "N scanned page(s) were skipped:
+  // <reason>" when the vision service is down but the text path still completed. A
+  // populated array does not block 'ready'; it tells the user what's incomplete.
+  warnings:     { type: [String], default: [] },
 }, { timestamps: true });
 
 DocumentSchema.index({ createdAt: -1 });

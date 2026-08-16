@@ -166,7 +166,7 @@ function makeLineFinder(pageText) {
 //      mid-table).
 //   6. Assign the final flat payload fields, including `position` (0-based across the
 //      whole document, assigned only once every page is processed).
-export async function chunkPages(pages, { documentId, fileName, mimeType, contentHash }) {
+export async function chunkPages(pages, { documentId, fileName, mimeType, contentHash, sourceKind = 'text' }) {
   const stack = [];              // heading stack, shared across all pages of this document
   const rawChunks = [];          // { text, headingPath, page, tableHeader }
 
@@ -241,7 +241,7 @@ export async function chunkPages(pages, { documentId, fileName, mimeType, conten
       tokenCount: tokenLength(chunk.text),
       charCount: chunk.text.length,
       contentHash,
-      sourceKind: 'text',   // 'text' | 'ocr' - 'ocr' arrives in Phase 4
+      sourceKind,           // 'text' | 'ocr' - phase 4 passes 'ocr' for chunked OCR text
       createdAt: new Date().toISOString(),
     };
     // sheetName only exists for spreadsheet sources (parser.js's parseSpreadsheet) — omit

@@ -265,3 +265,75 @@ export async function countPoints(documentIds = null) {
   });
   return count;
 }
+
+// ── Phase 4: visual pages ─────────────────────────────────────────────────────────────
+
+// A second op breaker for the pages collection, distinct from `qdrantOpBreaker` above for
+// the same reason that one is distinct from the health-check `qdrantBreaker`: opossum's
+// `wrap()` memoizes by name on first call, so reusing either existing name would silently
+// route page upserts/deletes/queries into whichever function that name was first bound
+// to. (Amended from the phase 4 §6.4 sample, which called `qdrantBreaker.fire('upsert',
+// ...)` — that breaker is hardwired to the zero-arg health-check `pingRaw`, so the call as
+// written would have re-run a health ping instead of the real upsert.)
+const qdrantPagesBreaker = wrap('qdrant.pages', (fn) => fn(), { timeout: 5_000 });
+
+export async function upsertPages(pages, documentId, fileName) {
+  const points = pages.map((p) => ({
+    id: uuidv5(`${documentId}:page:${p.page}`, NAMESPACE),
+    vector: { colpali: p.multivector },      // list-of-lists → Qdrant multivector
+    payload: {
+      documentId, fileName, page: p.page,
+      imageUri: p.imageUri, widthPx: p.widthPx, heightPx: p.heightPx,
+      ocrText: p.ocrText.slice(0, 8000),     // payload preview; the chunked copy is authoritative
+      ocrQuality: p.ocrQuality, meanConfidence: p.meanConfidence,
+      patchCount: p.patchCount, sourceKind: 'page',
+    },
+  }));
+
+  // Batch size 4, not 256: one page is ~527 KB of fp32 multivector, so a 256-point
+  // batch would be a 135 MB request body. 4 keeps each request near 2 MB.
+  for (let i = 0; i < points.length; i += 4) {
+    const batch = points.slice(i, i + 4);
+    await qdrantPagesBreaker.fire(() => client().upsert(config.qdrant.pagesCollection, {
+      wait: true, points: batch,
+    }));
+  }
+}
+
+// MAX_SIM retrieval over the pages collection (phase 4 §7.1, architecture §5.4). Qdrant
+// applies MAX_SIM automatically for a `multivector_config` field when the query itself is
+// a list of vectors (the PAGES_SCHEMA `colpali` field above) — no `fusion` parameter is
+// needed since there is only one vector field to query here, unlike hybridQuery's two.
+export async function multivectorQuery({ queryMultivector, limit, documentIds = null }) {
+  const filter = documentIdFilter(documentIds);
+
+  const res = await qdrantPagesBreaker.fire(() => client().query(config.qdrant.pagesCollection, {
+    query: queryMultivector,
+    using: 'colpali',
+    limit,
+    filter,
+    with_payload: true,
+    with_vector: false,        // never ship a 1030x128 multivector per hit back to Node
+  }));
+
+  return res.points.map((p) => ({
+    pointId: String(p.id),
+    maxSimScore: p.score,      // late-interaction score — a rank artifact, NOT a
+                                // relevance measure, same status as hybridQuery's fusionScore
+    ...p.payload,
+  }));
+}
+
+export async function deletePagesByDocument(documentId) {
+  const before = await client().count(config.qdrant.pagesCollection, {
+    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    exact: true,
+  }).catch(() => ({ count: 0 }));   // collection may not exist yet on a very first call
+
+  await qdrantPagesBreaker.fire(() => client().delete(config.qdrant.pagesCollection, {
+    wait: true,
+    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+  }));
+
+  return { deletedPoints: before.count };
+}

@@ -233,7 +233,13 @@ export async function search(rawQuery, { documentIds = null, topN = 8 } = {}) {
   // 4. Rerank — the only signal the user's ordering comes from.
   t.mark('rerankStart');
   const { ranked, skipped } = await rerankOrDegrade(query, merged, topN);
-  t.mark('rerankEnd');
+  // Amended during Phase 3 implementation: rerankOrDegrade() never throws — it catches
+  // its own provider failure internally and returns normally with `skipped: true`, so an
+  // unconditional t.mark('rerankEnd') here always produces a real rerankMs, even when
+  // degraded. That contradicts task 3.10's acceptance criterion ("with rerank degraded,
+  // telemetry.rerankMs === null, not 0") — verified live against an invalidated rerank
+  // model. Only mark the end when a real rerank actually completed:
+  if (!skipped) t.mark('rerankEnd');
 
   // 5. Apply the relevance floor.
   const results = ranked.filter((r) => r.relevanceScore === null || r.relevanceScore >= RELEVANCE_FLOOR);

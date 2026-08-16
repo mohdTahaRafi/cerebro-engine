@@ -2,6 +2,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { v5 as uuidv5 } from 'uuid';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
+import { PREFETCH_LIMIT } from '../retrieval/constants.js';
 
 let _client = null;
 
@@ -213,6 +214,53 @@ export async function deleteByDocument(documentId) {
 export async function countByDocument(documentId) {
   const { count } = await client().count(config.qdrant.chunksCollection, {
     filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    exact: true,
+  });
+  return count;
+}
+
+// ── Phase 3: hybrid retrieval ─────────────────────────────────────────────────
+
+function documentIdFilter(documentIds) {
+  return documentIds?.length
+    ? { must: [{ key: 'documentId', match: { any: documentIds } }] }
+    : undefined;
+}
+
+// Server-side fusion via Qdrant's Query API (phase 3 §3.1) — one HTTP round trip fuses
+// the dense and sparse branches with RRF, deleting the hand-rolled RRF loop the legacy
+// SearchService.js used to run in Node. `filter` is applied inside EACH prefetch branch
+// and again at the top level: applying it only at the top level would let each branch
+// fill its PREFETCH_LIMIT slots with out-of-scope documents that then get discarded,
+// leaving far fewer than PREFETCH_LIMIT in-scope candidates for fusion to work with.
+export async function hybridQuery({ denseVector, sparseVector, limit, documentIds = null }) {
+  const filter = documentIdFilter(documentIds);
+
+  const res = await qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+    prefetch: [
+      { query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter },
+      { query: sparseVector, using: 'sparse', limit: PREFETCH_LIMIT, filter },
+    ],
+    query: { fusion: 'rrf' },   // Qdrant computes Reciprocal Rank Fusion server-side, k=60
+    limit,
+    filter,
+    with_payload: true,
+    with_vector: false,        // never ship 1024 floats per hit back to Node
+  }));
+
+  return res.points.map((p) => ({
+    pointId: String(p.id),
+    fusionScore: p.score,      // RRF score — a rank artifact, NOT a relevance measure
+    ...p.payload,
+  }));
+}
+
+// Total chunk count, optionally scoped to a set of documents — used by search.js to
+// distinguish "you have no documents" (empty_corpus) from "your documents don't cover
+// this" (no_relevant_matches), phase 3 §5.2.
+export async function countPoints(documentIds = null) {
+  const { count } = await client().count(config.qdrant.chunksCollection, {
+    filter: documentIdFilter(documentIds),
     exact: true,
   });
   return count;

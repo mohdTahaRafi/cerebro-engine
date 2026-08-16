@@ -3,6 +3,23 @@ import { config } from '../config/index.js';
 
 let client = null;
 
+// Phase 3 §7.3: search.js's traced stages (embed/retrieve/rerank) need this same
+// redacting client, but ES module import order means their top-level `traceable(...)`
+// calls run before api/index.js gets to call initTracing() below. Built lazily and
+// cached here so either call site gets the same instance regardless of which runs
+// first — construction alone does no network I/O, so building it even when tracing
+// ends up disabled is harmless (traceable no-ops on the env-var check either way).
+export function getTracingClient() {
+  if (client) return client;
+  // NFR-SEC-01: hide document text from traces. Structure, timing, and scores are
+  // preserved; the payloads that would mirror private content are not.
+  client = new Client({
+    hideInputs: (inputs) => redact(inputs),
+    hideOutputs: (outputs) => redact(outputs),
+  });
+  return client;
+}
+
 // LangChain.js reads LANGCHAIN_TRACING_V2, LANGCHAIN_API_KEY, and LANGCHAIN_PROJECT
 // from the environment automatically. This module's job is redaction and explicit
 // opt-out, not wiring.
@@ -16,13 +33,7 @@ export function initTracing() {
     process.env.LANGCHAIN_TRACING_V2 = 'false';
     return null;
   }
-  // NFR-SEC-01: hide document text from traces. Structure, timing, and scores are
-  // preserved; the payloads that would mirror private content are not.
-  client = new Client({
-    hideInputs: (inputs) => redact(inputs),
-    hideOutputs: (outputs) => redact(outputs),
-  });
-  return client;
+  return getTracingClient();
 }
 
 const SENSITIVE = new Set(['text', 'content', 'pageContent', 'ocrText', 'sources', 'documents']);

@@ -3,7 +3,6 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import mongoose from 'mongoose';
-import CircuitBreaker from 'opossum';
 import { randomUUID } from 'crypto';
 import { ingestDocument } from '../services/IngestionService.js';
 import { hybridSearch } from '../services/SearchService.js';
@@ -19,6 +18,7 @@ import { initTracing } from '../telemetry/tracing.js';
 import { pingGraph } from '../graph/pingGraph.js';
 import healthRouter from './routes/health.js';
 import documentsRouter from './routes/documents.js';
+import searchRouter from './routes/search.js';
 import { startWorker } from '../ingestion/queue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,14 +83,19 @@ mongoose.connect(config.mongo.uri)
 
 // Routes
 // GET /health — replaces the trivial legacy handler with concurrent per-dependency
-// probes (phase 1 §8). Not one of the routes phase 1 §1 promises to keep untouched
-// (only /api/ingest, /api/search, /api/ask are legacy-frozen).
+// probes (phase 1 §8). Not one of the routes phase 1 §1 promised to keep untouched
+// (originally /api/ingest, /api/search, /api/ask; /api/search was re-pointed in Phase 3).
 app.use(healthRouter);
 
 // Phase 2: new document-lifecycle API (upload → async ingest → ready), independent of the
 // legacy /api/ingest below. Both write different stores (Qdrant here, MongoDB legacy) so
 // they coexist without conflict until Phase 6 decommissions the legacy path.
 app.use(documentsRouter);
+
+// Phase 3: hybrid retrieval + reranking, mounted at the same /api/search path the legacy
+// MongoDB-backed handler used to serve (removed here; SearchService.js itself stays on
+// disk, still used by /api/ask below, until Phase 6 decommissions it — phase 3 §8).
+app.use(searchRouter);
 
 /**
  * Ping Graph — THROWAWAY (phase 1 §9.2). Proves the LangGraph runtime and the
@@ -146,69 +151,6 @@ app.post('/api/ingest', upload.single('document'), async (req, res) => {
             error: error.message, 
             message: "Ingestion failed. Temporary file has been kept on the server for retry."
         });
-    }
-});
-
-/**
- * Search Endpoint
- * Hybrid search using Lexical (Atlas Search) + Vector (C++ Rerank)
- *
- * Wrapped in an opossum circuit breaker: if MongoDB/the C++ engine start failing
- * repeatedly, the circuit opens and fails fast (503) instead of letting every
- * request hang/error individually. Trips are visible to the frontend via the
- * `{ status: 'Circuit Open' }` shape useCerebroSearch.ts already checks for.
- */
-async function executeSearch(query, scopeSources) {
-    // 1. Vectorize the query
-    const encodingResult = await encodeText([query]);
-    const queryVector = encodingResult.vectorData;
-
-    // 2. Perform Hybrid Search, collecting real timing as it runs
-    const timing = {};
-    const results = await hybridSearch(query, queryVector, null, 10, timing, scopeSources);
-
-    return { results, embeddingMs: encodingResult.metrics.latencyMs, timing };
-}
-
-const searchBreaker = new CircuitBreaker(executeSearch, {
-    timeout: 8000,               // fail a single request if it takes longer than this
-    errorThresholdPercentage: 50, // open the circuit once >50% of recent requests fail
-    resetTimeout: 10000,         // wait this long before trying a request again (half-open)
-    volumeThreshold: 3,          // require at least 3 requests in the window before tripping
-});
-
-app.post('/api/search', async (req, res) => {
-    const routeStart = performance.now();
-    try {
-        const { query, scopeSources } = req.body;
-        if (!query) {
-            return res.status(400).json({ error: "Query text is required." });
-        }
-
-        const { results, embeddingMs, timing } = await searchBreaker.fire(query, scopeSources);
-
-        res.json({
-            results,
-            query,
-            telemetry: {
-                cacheWaitMs: 0, // no cache layer exists yet — honest zero, not a placeholder
-                embeddingMs,
-                retrievalMs: timing.retrievalMs,
-                rerankingMs: timing.rerankingMs,
-                rerankingUs: timing.rerankingUs,
-                totalMs: performance.now() - routeStart,
-            }
-        });
-
-    } catch (error) {
-        if (searchBreaker.opened) {
-            return res.status(503).json({
-                status: 'Circuit Open',
-                error: 'Search engine is temporarily unavailable due to repeated failures. Please retry shortly.'
-            });
-        }
-        console.error('Search error:', error);
-        res.status(500).json({ error: error.message });
     }
 });
 

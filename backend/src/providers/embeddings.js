@@ -55,3 +55,23 @@ export async function encodeDocuments(texts) {
 // has one `embeddings` module for both dense and sparse, matching the spec's job-handler
 // shape even though the sparse implementation lives in its own file.
 export const encodeSparse = bm25EncodeSparse;
+
+// ── Phase 3: query embedding ─────────────────────────────────────────────────
+
+// inputType: 'search_query' here vs 'search_document' at ingest time (above) is the
+// asymmetry the old MiniLM path had no mechanism for. Cohere v3 trains the two input
+// types into different regions of the space, so a short question and the long passage
+// answering it land near each other despite little lexical overlap — this is the largest
+// single-line quality difference between the old pipeline and the new one (phase 3 §2.1).
+export async function encodeQuery(text) {
+  const res = await embedBreaker.fire({
+    model: config.cohere.embedModel,
+    texts: [text],
+    inputType: 'search_query',
+    embeddingTypes: ['float'],
+  });
+  return {
+    vector: res.embeddings.float[0],
+    tokens: res.meta?.billedUnits?.inputTokens ?? 0,
+  };
+}

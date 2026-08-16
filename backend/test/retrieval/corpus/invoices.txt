@@ -1,0 +1,16 @@
+Meridian Holdings - Outstanding Invoice Register - EMEA Distribution
+
+INV-2024-8801  Customer: Nordling Fasteners AB          Amount: 12,450.00 EUR  Status: Paid
+INV-2024-8814  Customer: Rheinmetall Supply Co           Amount: 3,200.50 EUR   Status: Paid
+INV-2024-8832  Customer: Iberia Industrial Parts SL      Amount: 980.00 EUR     Status: Overdue
+INV-2024-8845  Customer: Nordling Fasteners AB           Amount: 5,610.75 EUR   Status: Paid
+INV-2024-8859  Customer: Baltic Marine Hardware Oy       Amount: 22,300.00 EUR  Status: Pending
+INV-2024-8871  Customer: Rheinmetall Supply Co           Amount: 41,875.20 EUR  Status: Overdue - 90 days past due, referred to collections on 2024-09-30
+INV-2024-8884  Customer: Iberia Industrial Parts SL      Amount: 1,140.00 EUR   Status: Paid
+INV-2024-8897  Customer: Nordling Fasteners AB           Amount: 760.40 EUR     Status: Paid
+INV-2024-8903  Customer: Baltic Marine Hardware Oy       Amount: 9,025.00 EUR   Status: Pending
+INV-2024-8916  Customer: Meridian Direct (internal)      Amount: 2,300.00 EUR   Status: Paid
+
+Notes: this register covers the EMEA distribution ledger only. Americas and APAC
+invoices are tracked in the regional ERP and are not included here. Collections
+referrals are actioned by finance ops once an invoice crosses 90 days past due.

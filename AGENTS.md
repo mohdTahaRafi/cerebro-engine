@@ -72,6 +72,24 @@ pure-function or parser-level and need no server. If a sandboxed/automated envir
 reaps background processes between commands, start the server and run that one test in a
 single shell invocation rather than expecting a previously-launched server to persist.
 
+New pipeline (Phase 3 — hybrid retrieval + reranking):
+
+```bash
+npm run test:encode-query      # asserts the Cohere embed call carries inputType: 'search_query'
+npm run test:corpus:setup      # ingests the phase 3 fixture corpus into cerebro_chunks_test
+npm run test:retrieval         # recall@3 regression + relevance-floor + scoping isolation suites
+```
+
+`npm run test:retrieval` reads `test/retrieval/queries.json` against the isolated
+`cerebro_chunks_test` Qdrant collection populated by `test:corpus:setup` — never against
+the live `cerebro_chunks` collection real documents live in. Both need the Docker stack up
+and live Cohere credentials. On a rate-limited (trial-tier) Cohere key, pace the live calls
+with `RETRIEVAL_TEST_PACE_MS=8000 npm run test:retrieval`; a production key needs no
+pacing. `/api/search` itself (`backend/src/api/routes/search.js`) now reads Qdrant via
+`backend/src/retrieval/search.js` — `SearchService.js` and the C++ rerank path are no
+longer routed to, though they remain on disk (and power `/api/ask`'s grounding) until
+Phase 6.
+
 `npm test` and the phase scripts create temporary files; database scripts may insert/delete MongoDB data; the loader test may fetch a remote PDF. Run them only with permission and suitable local test data. The frontend has `npm run build`, but no configured unit-test, lint, or type-check script.
 
 ## Technical constraints

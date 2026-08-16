@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1,
+    "query": "What was EMEA revenue in Q3?",
+    "documentId": "fixture-report",
+    "matchText": "| EMEA | 3.8M | 4.0M | 4.2M | 4.4M |",
+    "tests": "Dense semantic match against a table"
+  },
+  {
+    "id": 2,
+    "query": "INV-2024-8871",
+    "documentId": "fixture-invoices",
+    "matchText": "INV-2024-8871",
+    "tests": "Sparse/BM25 exact-identifier match (FR-SRCH-02)"
+  },
+  {
+    "id": 3,
+    "query": "how do I authenticate",
+    "documentId": "fixture-spec",
+    "matchText": "carry a valid credential in the `X-Api-Key` request header",
+    "tests": "Semantic match with zero lexical overlap"
+  },
+  {
+    "id": 4,
+    "query": "revenu EMEA Q3",
+    "documentId": "fixture-report",
+    "matchText": "| EMEA | 3.8M | 4.0M | 4.2M | 4.4M |",
+    "tests": "Typo + cross-language tolerance"
+  },
+  {
+    "id": 5,
+    "query": "SKU-99",
+    "documentId": "fixture-catalog",
+    "matchText": "SKU-99",
+    "tests": "Identifier inside a markdown table"
+  },
+  {
+    "id": 6,
+    "query": "what is the airspeed velocity of a swallow",
+    "expectEmpty": true,
+    "tests": "Floor correctly rejects an off-corpus query"
+  },
+  {
+    "id": 7,
+    "query": "the",
+    "expectEmpty": true,
+    "tests": "Stopword-only query does not return arbitrary content"
+  },
+  {
+    "id": 8,
+    "query": "authentication",
+    "documentId": "fixture-spec",
+    "matchText": "carry a valid credential in the `X-Api-Key` request header",
+    "scopeDocumentId": "fixture-spec",
+    "tests": "Scoping filter excludes other documents"
+  }
+]

@@ -467,3 +467,245 @@ DELETED (13 modules, §5.1)
 - **Net LOC change**: roughly −1,900 across the backend once the legacy pipeline is removed
 
 The migration ends with less code than it started with. That is the point: roughly 2,400 lines of hand-rolled loaders, sanitizers, chunkers, encoders, fusion math, and in-memory fallback scanning are replaced by roughly 500 lines of adapter and orchestration code plus a set of libraries built for the job — and the one piece of genuinely differentiating hand-written code, the AVX2 kernel, survives with an honest benchmark explaining exactly what it is and is not good for.
+
+---
+
+## 16. Implementation Amendments
+
+Recorded per the execution-discipline rule that the spec is the source of truth and must not
+silently drift from the code: where implementation proved a section of this document wrong
+or incomplete, the change is written down here with its reason rather than left as an
+undocumented difference between the plan and the tree.
+
+| # | Section | Amendment |
+|---|---|---|
+| 16.1 | §2.1, §2.2 | `PipelineTelemetry` gains a per-stage start offset (`<stage>StartMs`) |
+| 16.2 | §2.3 | Branch attribution costs three Qdrant round trips, not one |
+| 16.3 | §6.1 | The rate limiter needs its own Redis connection |
+| 16.4 | §8, §12 | `syncPageImagesToStorage` — how page images actually reach S3 |
+| 16.5 | §4.2 | `--drop-legacy` requires `--apply` in the same run |
+| 16.6 | §8.2 | Caddyfile must not strip `/api`, and scopes `flush_interval` to the whole API block |
+| 16.7 | §7.1 | `/health` is also served at `/api/health` for the browser |
+| 16.8 | §2.1, §12 | `HardwareStats.tsx` deleted, `SystemHealth.tsx` added |
+| 16.9 | §3.1 | Benchmark children regenerate the dataset from the seed |
+| 16.10 | §12 | Files created beyond the planned list |
+| 16.11 | §5.1 | Two files were deleted that this section did not name |
+| 16.12 | §13 | The first-token budget is not measurable on the reference host |
+| 16.13 | Phase 4 | `python-multipart` was missing from `vision/requirements.txt` |
+| 16.14 | §3.3, §11 | Measured Recall@10 at 100k is 0.4, not the milestone's assumed 0.98 — no query-time `hnsw_ef` is set anywhere, benchmark or production |
+| 16.15 | §11, task 6.21 | The 12-page scanned fixture is too slow to embed on this host's CPU to prove 6.21 in reasonable time; a 1-page extract proves the same S3 mechanism |
+
+### 16.1 `PipelineTelemetry` gains a per-stage start offset (§2.1, §2.2)
+
+§2.1's interface lists durations only. §2.2 then requires the waterfall's x-axis be "real
+elapsed time from request start, not a stacked sum." Those two requirements are
+incompatible: given only durations, a renderer can position a bar solely by accumulating the
+durations before it, which *is* the stacked sum §2.2 rules out.
+
+Each stage therefore also reports `<stage>StartMs`, an offset from the request's own origin.
+Producers (`retrieval/timer.js` and the graph nodes) emit a raw `performance.now()` instant;
+`telemetry/pipelineTelemetry.js` subtracts the request origin and drops the absolute value so
+it never reaches the wire. All timing happens in one process, so instants taken in different
+modules are directly comparable against one origin.
+
+The visible payoff is that real gaps stop being hidden. A measured `/api/ask` run shows
+`merge` ending at 488.22ms and `rerank` starting at 495.77ms — 7.5ms of node-transition time
+that a stacked layout would have silently absorbed.
+
+### 16.2 Branch attribution costs three Qdrant round trips, not one (§2.3)
+
+§2.3 requires each result to show which branch produced it, "derived from prefetch
+membership." Qdrant's server-side RRF returns only the fused list; which prefetch branch
+contributed a given point is not recoverable from that response. `hybridQuery` therefore
+issues two additional membership-only queries (`with_payload: false`) concurrently with the
+fused one, at the same `PREFETCH_LIMIT`, and diffs the id sets.
+
+This is 3 round trips where §3.1 celebrated "one HTTP round trip." Accepted deliberately:
+all three are sub-30ms ANN lookups against the same warm collection, negligible beside the
+~250-500ms rerank stage that follows, and the alternative is a provenance panel that cannot
+answer the question §2.3 says is its most informative column.
+
+### 16.3 The rate limiter needs its own Redis connection (§6.1)
+
+§6.1's sample passes the shared client into `RedisStore`. That crashes the process on every
+boot. The shared client (`src/redis.js`) is built with `enableOfflineQueue: false` so
+`/health` fails fast rather than blocking on a dead connection; `rate-limit-redis` loads its
+Lua script *synchronously in the store constructor*, at module-import time, before the
+handshake has necessarily completed — and with offline queueing disabled that command has
+nowhere to wait and throws immediately.
+
+`api/middleware/rateLimit.js` opens its own `ioredis` connection with default queueing. A
+rate limiter has no reason to inherit a fail-fast requirement designed for a health probe.
+
+### 16.4 `syncPageImagesToStorage` — how page images actually reach S3 (§8, §12)
+
+§8.1 sets `STORAGE_DRIVER: s3` on the backend but never says how a page image gets from the
+vision service into the bucket. The vision service has no S3 awareness at all — it always
+writes JPEGs to `PAGE_STORAGE_DIR` on local disk, which keeps that container purely
+computational rather than re-implementing driver selection in a second language.
+
+The resolution: `docker-compose.prod.yml` mounts a `page_staging` volume into both
+containers; after `embedPages` returns, `ingestion/ingestDocument.js` reads each image off
+that shared volume, uploads it through the real storage driver, **and deletes the staging
+copy**. Without the delete the volume grows without bound — document deletion routes through
+`storage.deletePrefix`, which under the S3 driver only touches the bucket, so nothing would
+ever reclaim it. On `STORAGE_DRIVER=filesystem` the whole step is skipped: there
+`PAGE_STORAGE_DIR` *is* the storage backend, so the file is already canonical and deleting
+the "staging" copy would destroy the only copy.
+
+### 16.5 `--drop-legacy` requires `--apply` in the same run (§4.2)
+
+§4.2 gates the collection drop on `--drop-legacy` plus `--accept-losses`. Implementation
+added a third condition: the run must also pass `--apply`. Without it, `--drop-legacy` alone
+would delete the legacy collection during what is otherwise a dry run — destroying the source
+of truth for documents that were never actually migrated, because a dry run enqueues nothing.
+
+### 16.6 Caddyfile must not strip `/api`, and scopes `flush_interval` to the whole API block (§8.2)
+
+Two corrections to §8.2's sample, both verified live against a real Caddy container:
+
+1. **`handle_path` breaks every route.** It strips the matched prefix before proxying, but
+   every backend route is declared with its literal `/api/` prefix (`router.post('/api/ask',
+   …)`). With `handle_path /api/*`, a request to `/api/ask` reached the backend as `/ask` and
+   returned "Cannot POST /ask" — every API route 404s the moment Caddy is in the path, which
+   is invisible in development where nothing proxies. `handle` does not strip.
+2. **`flush_interval -1` applies to the whole `/api/*` block**, not a separate `@sse`
+   matcher. Caddy sorts directives automatically, and mixing `handle_path` with a
+   matcher-scoped `reverse_proxy` at the same level reordered them by directive name rather
+   than by path specificity — repeatedly, across several restructurings. Collapsing to one
+   block removes the ambiguity. The cost is that ordinary JSON responses also flush per
+   write, which is unmeasurable because Express writes them in a single shot anyway.
+
+Verified: 38 token frames arriving over 5,346ms through Caddy, i.e. genuinely incremental.
+
+### 16.7 `/health` is also served at `/api/health` for the browser (§7.1)
+
+The advanced console's health panel cannot reach bare `/health`: both proxies in this
+project route on the `/api` prefix alone — Vite's dev server and the Caddyfile. In
+development the fetch 404s; in production it falls through to the SPA catch-all and returns
+`index.html`, which the panel would parse as JSON.
+
+Widening either proxy to carry `/health` would also expose it publicly through Caddy, which
+is the opposite of §7.2's intent for operational endpoints. Registering the same handler at
+`/api/health` gives the browser a route on the surface it is already permitted to use while
+leaving the infra path (`Dockerfile` `HEALTHCHECK`, Compose conditions) private.
+
+### 16.8 `HardwareStats.tsx` deleted, `SystemHealth.tsx` added (§2.1, §12)
+
+§12 does not list `HardwareStats.tsx`, so it was initially left alone — but it rendered a
+hardcoded "Redis Cache Hit Rate 98.2%" and a mock C++ exec-time series against a static
+array, describing a Redis cache that does not exist and a C++ engine that left the query path
+in Phase 3. That is precisely the fabrication §2.1 exists to eliminate, sitting next to the
+real waterfall. It is replaced by `SystemHealth.tsx`, which polls `/api/health` for
+dependency status, breaker states, queue depth, and collection counts — all measured.
+
+`QueryConsole.tsx` was corrected for the same reason: it shipped a fake SQL query as its
+default value and a `mockHash` labeled "Computed Hash (SHA-256)". Neither corresponds to
+anything the backend does; `/api/ask` takes a natural-language question and nothing hashes it.
+
+### 16.9 Benchmark children regenerate the dataset from the seed (§3.1)
+
+§3 does not specify how the dataset reaches the per-engine child processes. Marshalling it
+through a temp file cost, at 1M × 1024 dims, 4.1 GB of writes, 4.1 GB of reads, and ~8.2 GB
+of concurrent RSS because parent and child each held a copy. Since the PRNG is seeded and
+deterministic, each child regenerates the identical dataset from the same seed instead, and
+the parent releases its copy before spawning any child — peak memory is one dataset, not
+three, and the disk round-trip disappears.
+
+Because parent and child now generate data *independently*, the benchmark asserts that
+`js-scalar`, `cpp-scalar`, and `cpp-avx2` agree on the exact top-K before reporting anything.
+All three are exact brute-force scans, so disagreement proves the regeneration diverged and
+the numbers are not comparable; the run aborts rather than publishing them. The guard was
+itself verified to fire (same seed → identical ranking; different seed → different ranking).
+It compares index order rather than scores, because JS accumulation order and the AVX2
+horizontal reduction legitimately differ in the last float32 bits.
+
+### 16.10 Files created beyond the planned list (§12)
+
+`backend/src/telemetry/pipelineTelemetry.js` (the shared wire contract — §12 implied it
+inside `metrics.js`, but the console's contract and the Prometheus registry are separate
+concerns), `backend/bench/lib/{prng,stats,jsEngine,qdrantEngine,cppChild}.js` (§12 lists only
+`cppVsQdrant.js`; the per-engine split is what makes the required separate-process dispatch
+possible), `backend/.dockerignore`, root `.env.example`, and
+`frontend/test/renderConsole.test.mjs`.
+
+### 16.11 Two files were deleted that this section did not name (§5.1)
+
+Beyond §5.1's list, `backend/test/phase3-loader-formats.js` and
+`backend/test/test-semantic-chunker-nopunct.js` were also deleted. Both imported modules
+§5.1 removed and were therefore dead, but neither was named here and both were untracked, so
+neither is recoverable from version control. Recorded as an overstep rather than quietly
+folded into the count.
+
+### 16.12 The first-token budget is not measurable on the reference host (§13)
+
+§13 targets "first token < 5s". Architecture §5.8 makes Claude the primary generation path
+with Ollama as an operator-selected fallback. The development host has no
+`ANTHROPIC_API_KEY` and runs `LLM_PROVIDER=ollama` with an 8B model on CPU, which produced a
+measured first token of 26.6s. That is a property of the configured provider, not of the
+pipeline, so the budget is recorded as **not measurable here** rather than as passing or
+failing. Validating it requires the Anthropic path.
+
+### 16.13 `python-multipart` was missing from `vision/requirements.txt` (Phase 4)
+
+Surfaced while verifying task 6.21. `vision/app/routes.py`'s `/embed_pages` accepts
+`multipart/form-data`, and FastAPI does not bundle a multipart parser — without
+`python-multipart` it raises while *building the route table*, so the service fails at import
+time rather than on first request. This went unnoticed because the running container image
+predated Phase 4 entirely: it carried only `colpali.py`, `main.py`, `routes.py`, and
+`schemas.py`, with `/classify` and `/embed_pages` as 501 stubs, and every health check passed
+against that skeleton. Any environment still running a pre-Phase-6 vision image must rebuild
+it (`docker compose build vision`).
+
+### 16.14 Measured Recall@10 at 100k is 0.4, not 0.98 — no query-time `hnsw_ef` anywhere (§3.3, §11)
+
+§11's milestone narrative asserts "Qdrant holding Recall@10 of 0.98 throughout" as if
+already measured. Running `node bench/cppVsQdrant.js --sizes=100000` for real (per-instance
+determinism guard passed, so this is not a dataset mismatch — see §16.9) measured
+**Recall@10 = 0.4** at 100k vectors, not 0.98.
+
+Root cause, confirmed with a focused isolated repro (20k vectors, exact brute-force ground
+truth compared against Qdrant with and without an explicit search-time `ef`): neither
+`bench/lib/qdrantEngine.js`'s `client.query()` call nor production's own
+`hybridQuery`/`multivectorQuery` (`src/providers/vectorStore.js`) passes
+`params: { hnsw_ef }`. Qdrant's un-tuned default search `ef` reached only 0.9 recall at
+20k vectors in the repro and does not scale up with corpus size on its own; explicitly
+setting `hnsw_ef: 256` in the same repro reached 1.0 recall against the same corpus. Recall
+degrading as N grows, on a fixed default `ef`, is exactly the mechanism — more candidates
+compete for the same fixed search-time exploration budget.
+
+This is a genuine production retrieval-quality gap, not a benchmark artifact: the
+benchmark's collection is deliberately built with production's own `hnsw_config`
+(`m: 16, ef_construct: 128`, `qdrantEngine.js`'s own comment: "matches CHUNKS_SCHEMA — the
+real serving config"), and production's query calls have the identical omission. The
+benchmark is reporting what the shipped system actually does today, honestly, per §3.1's
+own standard for what "honest" means here.
+
+**Deliberately not fixed as part of this phase.** §1 rules out retrieval-behavior changes
+explicitly ("No new retrieval or generation capability... Anything proposing new pipeline
+behavior belongs in §14"), and tuning `hnsw_ef` on `hybridQuery`/`multivectorQuery` changes
+which chunks and pages get retrieved for every real query — a correctness fix, but one with
+product-visible ranking impact that deserves its own change and its own before/after
+retrieval-regression run (`test:retrieval`'s Recall@3 suite, phase 3 §8), not a silent
+edit inside a phase whose own charter disclaims touching retrieval behavior. `bench/README.md`
+is corrected to report the real measured number and name this gap rather than repeat the
+unverified 0.98 claim.
+
+### 16.15 The 12-page scanned fixture is too slow to embed on this host to prove 6.21 in reasonable time (§11, task 6.21)
+
+`test/vision/fixtures/scanned-12pg.pdf` is the fixture task 6.21's verification naturally
+reaches for, but ColPali's CPU batching (`vision/app/colpali.py`'s `PAGE_BATCH_SIZE = 2`,
+sized for memory, not throughput) makes 12 pages six sequential model forward passes. Timed
+directly against an otherwise-idle vision service (bypassing Node's own client-side
+timeout entirely, `curl --max-time 900`), the request was still running — CPU pegged,
+memory still climbing, no crash or error — past the full 15-minute ceiling. `OMP_NUM_THREADS:
+"4"` (docker-compose.yml) caps the container to roughly 4 threads regardless of the host's
+core count, so this is a genuine per-page throughput ceiling on this reference host, not a
+hang: far below the ~6s/page the Phase 1 timeout budget assumed.
+
+Task 6.21's acceptance criterion only requires *a* scanned ingest to prove the S3 storage
+mechanism (`syncPageImagesToStorage`) — it does not require this specific 12-page fixture.
+A single page extracted from the same fixture (`gs -sDEVICE=pdfwrite -dFirstPage=1
+-dLastPage=1`, confirmed image-only: no `/Font`, has `/Image`) exercises the identical
+per-page code path in a fraction of the time and is what this phase's verification actually
+ingested to prove 6.21.

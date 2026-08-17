@@ -12,7 +12,11 @@ const UPLOAD_BATCH = 500;
 // needs cpp-avx2's exact result as ground truth, and that engine runs in a child process
 // spawned only AFTER the parent has released its dataset copy (see cppVsQdrant.js's
 // ordering comment), so the comparison happens in the caller once both halves exist.
-export async function runQdrant({ url, apiKey, collectionName, dim, dataset, query, k, onUploadProgress }) {
+// `hnswEf` is the search-time exploration width. It defaults to production's
+// HNSW_EF_SEARCH so the benchmark measures what the app actually does; pass
+// `--hnsw-ef=<n>` (or null, for Qdrant's untuned default) to sweep it.
+export async function runQdrant({ url, apiKey, collectionName, dim, dataset, query, k, hnswEf, onUploadProgress }) {
+  const params = hnswEf == null ? undefined : { hnsw_ef: hnswEf };
   const client = new QdrantClient({ url, apiKey, checkCompatibility: false });
 
   await client.deleteCollection(collectionName).catch(() => {});
@@ -41,7 +45,7 @@ export async function runQdrant({ url, apiKey, collectionName, dim, dataset, que
     const queryVec = Array.from(query);
 
     for (let i = 0; i < WARMUP_ITERATIONS; i += 1) {
-      await client.query(collectionName, { query: queryVec, limit: k, with_payload: false, with_vector: false });
+      await client.query(collectionName, { query: queryVec, limit: k, params, with_payload: false, with_vector: false });
     }
 
     const samples = [];
@@ -49,7 +53,7 @@ export async function runQdrant({ url, apiKey, collectionName, dim, dataset, que
     for (let i = 0; i < TRIALS; i += 1) {
       const t0 = performance.now();
       // eslint-disable-next-line no-await-in-loop
-      const res = await client.query(collectionName, { query: queryVec, limit: k, with_payload: true, with_vector: false });
+      const res = await client.query(collectionName, { query: queryVec, limit: k, params, with_payload: true, with_vector: false });
       samples.push(performance.now() - t0);
       lastTop = res.points;
     }

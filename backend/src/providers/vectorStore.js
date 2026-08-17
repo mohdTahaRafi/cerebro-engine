@@ -2,7 +2,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { v5 as uuidv5 } from 'uuid';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
-import { PREFETCH_LIMIT } from '../retrieval/constants.js';
+import { PREFETCH_LIMIT, HNSW_EF_SEARCH } from '../retrieval/constants.js';
 
 let _client = null;
 
@@ -251,7 +251,9 @@ export async function hybridQuery({ denseVector, sparseVector, limit, documentId
   const [fused, denseOnly, sparseOnly] = await Promise.all([
     qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
       prefetch: [
-        { query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter },
+        // hnsw_ef only on the dense branch: sparse is served by an inverted index, which
+        // has no HNSW graph to explore and ignores the parameter.
+        { query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter, params: { hnsw_ef: HNSW_EF_SEARCH } },
         { query: sparseVector, using: 'sparse', limit: PREFETCH_LIMIT, filter },
       ],
       query: { fusion: 'rrf' },   // Qdrant computes Reciprocal Rank Fusion server-side, k=60
@@ -261,7 +263,11 @@ export async function hybridQuery({ denseVector, sparseVector, limit, documentId
       with_vector: false,        // never ship 1024 floats per hit back to Node
     })),
     qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+      // Same hnsw_ef as the fused query's dense prefetch above — a membership set drawn at
+      // a different exploration width would not match what fusion actually drew from, and
+      // the provenance panel would attribute branches to the wrong results.
       query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter,
+      params: { hnsw_ef: HNSW_EF_SEARCH },
       with_payload: false, with_vector: false,
     })),
     qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
@@ -352,6 +358,8 @@ export async function multivectorQuery({ queryMultivector, limit, documentIds = 
     using: 'colpali',
     limit,
     filter,
+    params: { hnsw_ef: HNSW_EF_SEARCH },   // same recall gap as hybridQuery's dense branch
+
     with_payload: true,
     with_vector: false,        // never ship a 1030x128 multivector per hit back to Node
   }));

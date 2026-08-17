@@ -22,6 +22,7 @@ import { fileURLToPath } from 'url';
 import { mulberry32, randomFloat32Array, SEED } from './lib/prng.js';
 import { runJsScalar } from './lib/jsEngine.js';
 import { runQdrant } from './lib/qdrantEngine.js';
+import { HNSW_EF_SEARCH } from '../src/retrieval/constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIM = 1024;          // embed-multilingual-v3.0 output width — the real serving dimension (config/index.js)
@@ -29,11 +30,17 @@ const K = 10;
 const RESULTS_DIR = path.join(__dirname, 'results');
 
 function parseArgs(argv) {
-  const args = { sizes: [1_000, 10_000, 100_000, 1_000_000], skipQdrant: false, saveBaseline: false };
+  const args = { sizes: [1_000, 10_000, 100_000, 1_000_000], skipQdrant: false, saveBaseline: false, hnswEf: HNSW_EF_SEARCH };
   for (const arg of argv) {
     if (arg.startsWith('--sizes=')) args.sizes = arg.slice(8).split(',').map(Number);
     else if (arg === '--skip-qdrant') args.skipQdrant = true;
     else if (arg === '--save-baseline') args.saveBaseline = true;
+    // --hnsw-ef=default reproduces the pre-fix measurement: Qdrant's untuned search ef,
+    // which is what every query used before HNSW_EF_SEARCH existed.
+    else if (arg.startsWith('--hnsw-ef=')) {
+      const raw = arg.slice(10);
+      args.hnswEf = raw === 'default' ? null : Number(raw);
+    }
   }
   return args;
 }
@@ -54,7 +61,7 @@ function speedup(baselineMs, comparedMs) {
   return Math.round((baselineMs / comparedMs) * 100) / 100;
 }
 
-async function benchOneSize(size, { skipQdrant }) {
+async function benchOneSize(size, { skipQdrant, hnswEf }) {
   console.log(`\n=== corpus size: ${size.toLocaleString()} vectors × ${DIM} dims ===`);
   const seed = SEED ^ size;
 
@@ -87,6 +94,7 @@ async function benchOneSize(size, { skipQdrant }) {
         dataset,
         query,
         k: K,
+        hnswEf,
         onUploadProgress: (done, total) => {
           if (done === total || done % (UPLOAD_LOG_EVERY(total)) === 0) {
             process.stdout.write(`\r    uploaded ${done.toLocaleString()}/${total.toLocaleString()}`);
@@ -225,7 +233,7 @@ async function main() {
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
   const jsonPath = path.join(RESULTS_DIR, 'latest.json');
   const mdPath = path.join(RESULTS_DIR, 'latest.md');
-  fs.writeFileSync(jsonPath, JSON.stringify({ dim: DIM, k: K, generatedAt: new Date().toISOString(), results }, null, 2));
+  fs.writeFileSync(jsonPath, JSON.stringify({ dim: DIM, k: K, hnswEf: args.hnswEf, generatedAt: new Date().toISOString(), results }, null, 2));
   fs.writeFileSync(mdPath, toMarkdown(results));
   if (args.saveBaseline) fs.copyFileSync(jsonPath, path.join(RESULTS_DIR, 'baseline.json'));
 

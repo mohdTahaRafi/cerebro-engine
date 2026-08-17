@@ -101,18 +101,28 @@ async function collectFrames(response, { onFrame, signal } = {}) {
 }
 
 // ── 5.13: abort on client close stops the stream without crashing the server ───────
+// FIX (found live during phase 6 verification): the route calls res.flushHeaders()
+// before the graph even starts (ask.js), so the outer fetch() promise resolves with a
+// Response the instant headers arrive — well under 1500ms. Aborting afterward can never
+// reject an already-settled promise; that was asserting against the wrong object.
+// AbortError actually surfaces on the *body read* that is in flight when abort() fires,
+// so this reads the body directly (bypassing collectFrames' own `signal?.aborted` guard,
+// which exists for graceful client-side stop-button use and would swallow exactly the
+// rejection this test needs to observe) and asserts that read rejects.
 {
   const controller = new AbortController();
-  const pending = fetch(`${BASE_URL}/api/ask`, {
+  const response = await fetch(`${BASE_URL}/api/ask`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: 'Write a long, detailed essay about the entire corpus, in full.' }),
     signal: controller.signal,
   });
+  const reader = response.body.getReader();
+  const readLoop = (async () => { while (!(await reader.read()).done); })();
 
   await new Promise((r) => setTimeout(r, 1500));
   controller.abort();
-  await assert.rejects(pending, /abort/i, 'the client fetch must reject with an AbortError once cancelled');
+  await assert.rejects(readLoop, /abort/i, 'reading the response body after abort must reject with an AbortError');
 
   // The server must still be serving — a crash here would mean the abort path threw
   // somewhere it shouldn't have. (The route logging "the abort" server-side is verified

@@ -28,12 +28,15 @@ function toLangChainMessage(m) {
 // explicit projection rather than re-exporting state.sources as-is — state.sources is
 // already retrieval/search.js's toPublicResult shape (rerank.js maps it there), but
 // declaring the client contract separately here means a future field added to that
-// internal shape doesn't silently start streaming to the browser.
+// internal shape doesn't silently start streaming to the browser. Phase 6 §2.3 adds
+// branch/fusionRank/finalRank/absorbedChunks explicitly (not via a blanket `...s`) for the
+// same reason — the advanced console's provenance panel reads these by name.
 function toPublicSource(s) {
   return {
     pointId: s.pointId, kind: s.kind, text: s.text, score: s.score,
     documentId: s.documentId, fileName: s.fileName, page: s.page,
     headingPath: s.headingPath, imageUri: s.imageUri, ocrQuality: s.ocrQuality,
+    branch: s.branch, fusionRank: s.fusionRank, finalRank: s.finalRank, absorbedChunks: s.absorbedChunks,
   };
 }
 
@@ -113,12 +116,20 @@ export async function generateNode(state, config) {
   } catch (err) {
     emit('error', { error: 'Answer generation failed. Your search results are still available.' });
     return {
-      answer, timings: { generateMs: Math.round(performance.now() - t0) },
+      answer,
+      // generateStartAt (phase 6 §2.2) on the failure path too: a generation that errored
+      // partway still consumed real wall-clock time, and a waterfall that omitted its bar
+      // would leave unexplained dead space rather than showing where the time went.
+      timings: { generateMs: Math.round(performance.now() - t0), generateStartAt: t0 },
       warnings: [...warnings, `Generation failed: ${err.message}`],
     };
   }
 
   await llm.recordGenerationUsage({ provider: appConfig.llm.provider, usage, requestId: String(state.threadId) });
 
-  return { answer, timings: { firstTokenMs, generateMs: Math.round(performance.now() - t0) }, warnings };
+  return {
+    answer,
+    timings: { firstTokenMs, generateMs: Math.round(performance.now() - t0), generateStartAt: t0 },
+    warnings,
+  };
 }

@@ -10,6 +10,8 @@ import * as visionService from '../providers/visionService.js';
 import { rerankOrDegrade } from '../providers/reranker.js';
 import { normalize } from '../ingestion/normalize.js';
 import { getTracingClient } from '../telemetry/tracing.js';
+import { buildTelemetry } from '../telemetry/pipelineTelemetry.js';
+import { recordPipelineTelemetry } from '../telemetry/metrics.js';
 import { mergeByProvenance } from './merge.js';
 import { createTimer } from './timer.js';
 import { FUSION_LIMIT, PAGE_FUSION_LIMIT, RELEVANCE_FLOOR, TOP_N_DEFAULT } from './constants.js';
@@ -22,12 +24,30 @@ const EMPTY_MESSAGES = {
 
 // FR-SRCH-06: an explicit report rather than weak matches presented as authoritative.
 // `reason` distinguishes three genuinely different situations the console renders
-// differently — see EMPTY_MESSAGES above (phase 3 §5.2).
+// differently — see EMPTY_MESSAGES above (phase 3 §5.2). `extra` mixes two different
+// audiences — fields PipelineTelemetry defines (candidatesRetrieved, candidatesAfterMerge,
+// candidatesAfterFloor, rerankSkipped, warnings) and fields only the `empty` block cares
+// about (candidatesConsidered, bestScore) — split here rather than dumped into one object,
+// because a first attempt at this that spread `extra` only into `empty` silently left every
+// empty-result response reporting `telemetry.candidatesRetrieved: 0` even when retrieval
+// had genuinely found and merged 50 candidates that the relevance floor then rejected —
+// caught live against a real query, not by inspection.
+const TELEMETRY_EXTRA_KEYS = ['candidatesRetrieved', 'candidatesAfterMerge', 'candidatesAfterFloor', 'rerankSkipped', 'warnings'];
+
 function emptyResult(reason, t, extra = {}) {
+  const telemetryExtra = {};
+  const emptyExtra = {};
+  for (const [key, value] of Object.entries(extra)) {
+    (TELEMETRY_EXTRA_KEYS.includes(key) ? telemetryExtra : emptyExtra)[key] = value;
+  }
+  // t.startedAt() is the request origin here: runSearch's timer is created as the very
+  // first thing the request does, so its start instant IS the request start (phase 6 §2.2).
+  const telemetry = buildTelemetry({ ...t.report(), totalMs: t.elapsedMs(), ...telemetryExtra }, t.startedAt());
+  recordPipelineTelemetry(telemetry);
   return {
     results: [],
-    empty: { reason, message: EMPTY_MESSAGES[reason], ...extra },
-    telemetry: t.report(),
+    empty: { reason, message: EMPTY_MESSAGES[reason], ...emptyExtra },
+    telemetry,
   };
 }
 
@@ -66,6 +86,13 @@ export function toPublicResult(r) {
     // page this query (§7.2) — null rather than [] so the client can tell "nothing was
     // absorbed" apart from "this field doesn't apply" the same way imageUri does.
     absorbedChunks: r.absorbedChunks ?? null,
+    // Phase 6 §2.3 provenance panel: which retrieval branch(es) produced this candidate
+    // (vectorStore.js's hybridQuery/multivectorQuery) and its rank within that branch's
+    // own pre-rerank ordering. `finalRank` is stamped by the caller (runSearch / rerankNode)
+    // once the post-rerank, post-floor order is known — null until then.
+    branch: isPage ? 'colpali' : (r.branch ?? null),
+    fusionRank: r.fusionRank ?? null,
+    finalRank: r.finalRank ?? null,
   };
 }
 
@@ -77,15 +104,19 @@ export function toPublicResult(r) {
 // redacted wherever it appears in inputs/outputs by the SENSITIVE key set on the shared
 // client (telemetry/tracing.js, phase 1 §9.1).
 
+// Phase 6 §2.1: dense (Cohere API) and sparse (local BM25) get their own timer marks —
+// see retrieveStage below — because they are genuinely different-cost operations (a
+// network round trip vs. a synchronous local tokenizer pass) that used to be folded into
+// one `embedMs` number under a single traced span, which hid the fact that sparse costs
+// ~2-4ms while dense costs ~150-250ms. Split into two traceable spans for the same reason.
 const tracedEncode = traceable(
-  async (query) => {
-    const [dense, sparseVecs] = await Promise.all([
-      embeddings.encodeQuery(query),
-      embeddings.encodeSparse([query]),
-    ]);
-    return { dense, sparse: sparseVecs[0] };
-  },
+  (query) => embeddings.encodeQuery(query),
   { name: 'embed', run_type: 'embedding', client: getTracingClient() },
+);
+
+const tracedSparseEncode = traceable(
+  async (query) => (await embeddings.encodeSparse([query]))[0],
+  { name: 'sparse', run_type: 'embedding', client: getTracingClient() },
 );
 
 // Its own span, separate from tracedEncode, because it runs concurrently with it (§7.1)
@@ -133,9 +164,11 @@ async function retrieveStage(query, documentIds, t) {
   //    `.then()`, not after the outer `Promise.all` — the branches finish at different
   //    real times even though they start together.
   t.mark('embedStart');
+  t.mark('sparseStart');
   t.mark('colpaliStart');
-  const [{ dense: denseRes, sparse: sparseVec }, colpaliVec] = await Promise.all([
+  const [denseRes, sparseVec, colpaliVec] = await Promise.all([
     tracedEncode(query).then((r) => { t.mark('embedEnd'); return r; }),
+    tracedSparseEncode(query).then((r) => { t.mark('sparseEnd'); return r; }),
     tracedColpaliEmbed(query).then((v) => { t.mark('colpaliEnd'); return v; }),
   ]);
 
@@ -167,6 +200,16 @@ async function retrieveStage(query, documentIds, t) {
   return { chunkCandidates, pageCandidates };
 }
 
+// 3. Merge visual page candidates by provenance — timed on its own (phase 6 §2.1) even
+// though it is a synchronous, sub-millisecond Map/loop, because "assumed free" is exactly
+// the class of unmeasured number this timer exists to eliminate.
+function mergeStage(chunkCandidates, pageCandidates, t) {
+  t.mark('mergeStart');
+  const merged = mergeByProvenance(chunkCandidates, pageCandidates);
+  t.mark('mergeEnd');
+  return merged;
+}
+
 // Phase 5 §6: the graph's retrieveNode calls this directly. Owns its own timer (the graph
 // tracks its own per-node timing separately via performance.now() in retrieveNode) and
 // returns exactly `{ candidates, timings }` — no rerank, no relevance floor, no empty-state
@@ -178,8 +221,16 @@ export const retrieveCandidates = traceable(
     const t = createTimer();
     const query = normalize(rawQuery);
     const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
-    const candidates = mergeByProvenance(chunkCandidates, pageCandidates);
-    return { candidates, timings: t.report() };
+    const candidates = mergeStage(chunkCandidates, pageCandidates, t);
+    return {
+      candidates,
+      timings: t.report(),
+      // Phase 6 §2.1: pre-merge (what retrieval actually returned) vs. post-merge (what
+      // survived dedup) — two different, both meaningful, counts. The caller (retrieveNode)
+      // forwards both into RagState.timings; rerankNode later adds candidatesAfterFloor.
+      candidatesRetrieved: chunkCandidates.length + pageCandidates.length,
+      candidatesAfterMerge: candidates.length,
+    };
   },
   { name: 'retrieveCandidates', run_type: 'chain', client: getTracingClient() },
 );
@@ -194,6 +245,7 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
   if (!query) return emptyResult('empty_query', t);
 
   const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
+  const candidatesRetrieved = chunkCandidates.length + pageCandidates.length;
 
   if (chunkCandidates.length === 0 && pageCandidates.length === 0) {
     const corpusSize = await vectorStore.countPoints(documentIds);
@@ -205,7 +257,7 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
   // 3. Merge visual page candidates by provenance — a scanned page retrieved by both the
   //    OCR-chunk branch and the ColPali branch must not occupy two reranker slots and two
   //    result rows carrying the same evidence (architecture §5.5, phase 4 §7.2).
-  const merged = mergeByProvenance(chunkCandidates, pageCandidates);
+  const merged = mergeStage(chunkCandidates, pageCandidates, t);
 
   // 4. Rerank — the only signal the user's ordering comes from, across both kinds
   //    (phase 4 §7.3): after this stage a page and a chunk carry a `relevanceScore` from
@@ -224,6 +276,8 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
   // so only mark the end when a real rerank actually completed.
   if (!skipped) t.mark('rerankEnd');
 
+  const warnings = skipped ? ['Reranking was unavailable; results are in fusion order.'] : [];
+
   // 5. Apply the relevance floor. `rerankSkipped` means every score is null, and the
   //    filter passes everything through — degraded ranking must not also trigger a
   //    spurious empty state.
@@ -233,16 +287,32 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
     return emptyResult('no_relevant_matches', t, {
       candidatesConsidered: merged.length,
       bestScore: ranked[0]?.relevanceScore ?? 0,
+      // Verified live (task 6.1): omitting these here left them at buildTelemetry's 0
+      // default even though retrieval genuinely found and merged candidates — every
+      // relevance-floor rejection is a real "N candidates, 0 survived" story the console
+      // should be able to show, not indistinguishable from an empty corpus.
+      rerankSkipped: skipped,
+      candidatesRetrieved,
+      candidatesAfterMerge: merged.length,
+      candidatesAfterFloor: 0,
+      warnings,
     });
   }
 
+  const telemetry = buildTelemetry({
+    ...t.report(),
+    totalMs: t.elapsedMs(),
+    rerankSkipped: skipped,
+    candidatesRetrieved,
+    candidatesAfterMerge: merged.length,
+    candidatesAfterFloor: results.length,
+    warnings,
+  }, t.startedAt());
+  recordPipelineTelemetry(telemetry);
+
   return {
-    results: results.map(toPublicResult),
-    telemetry: t.report({
-      rerankSkipped: skipped,
-      candidatesRetrieved: merged.length,   // combined, post-merge — what actually went into rerank
-      candidatesAfterFloor: results.length,
-    }),
+    results: results.map((r, i) => toPublicResult({ ...r, finalRank: i + 1 })),
+    telemetry,
   };
 }
 

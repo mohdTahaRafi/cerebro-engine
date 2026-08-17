@@ -1,33 +1,13 @@
 import { useRef, useState } from 'react';
+import type { LangSmithLink, PipelineTelemetry, ProvenanceSource } from '../components/core/TelemetryTypes';
 
 // Matches retrieval/search.js's toPublicResult projection (backend), which rerank.js
 // (graph/nodes/rerank.js) uses to populate RagState.sources — the same shape the
 // generation prompt is built from and the shape /api/ask streams to the client (phase 5
-// §6, §7.4).
-export interface ChatSource {
-  pointId: string;
-  kind: 'text' | 'page';
-  text: string;
-  score: number | null;
-  documentId: string;
-  fileName: string;
-  page: number | null;
-  headingPath: string | null;
-  imageUri: string | null;
-  ocrQuality: number | null;
-}
+// §6, §7.4; branch/fusionRank/finalRank/absorbedChunks added phase 6 §2.3).
+export type ChatSource = ProvenanceSource;
 
-export interface ChatTelemetry {
-  condenseMs?: number | null;
-  embedMs?: number | null;
-  retrieveMs?: number | null;
-  colpaliMs?: number | null;
-  pageRetrieveMs?: number | null;
-  retrieveTotalMs?: number;
-  rerankMs?: number | null;
-  firstTokenMs?: number | null;
-  generateMs?: number;
-}
+export type ChatTelemetry = PipelineTelemetry;
 
 export function useCerebroChat() {
   const [answer, setAnswer] = useState<string>('');
@@ -36,6 +16,8 @@ export function useCerebroChat() {
   const [error, setError] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<ChatTelemetry | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [langsmith, setLangsmith] = useState<LangSmithLink | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   // Regenerate re-posts the *last* user query on the same thread — kept alongside
   // threadId rather than re-derived from message history, since this hook has no
@@ -57,6 +39,8 @@ export function useCerebroChat() {
     setSources([]);
     setError(null);
     setTelemetry(null);
+    setRunId(null);
+    setLangsmith(null);
 
     const activeThreadId = options.threadId ?? threadId;
 
@@ -123,6 +107,8 @@ export function useCerebroChat() {
                     break;
                   case 'telemetry':
                     setTelemetry(parsed.telemetry);
+                    setRunId(parsed.runId ?? null);
+                    setLangsmith(parsed.langsmith ?? null);
                     break;
                   case 'error':
                     setError(parsed.error);
@@ -164,6 +150,8 @@ export function useCerebroChat() {
     setSources([]);
     setError(null);
     setTelemetry(null);
+    setRunId(null);
+    setLangsmith(null);
   };
 
   const startNewThread = () => {
@@ -173,6 +161,8 @@ export function useCerebroChat() {
     setSources([]);
     setError(null);
     setTelemetry(null);
+    setRunId(null);
+    setLangsmith(null);
     lastQueryRef.current = null;
   };
 
@@ -194,6 +184,8 @@ export function useCerebroChat() {
     error,
     threadId,
     telemetry,
+    runId,
+    langsmith,
     askCerebro,
     loadThread,
     startNewThread,

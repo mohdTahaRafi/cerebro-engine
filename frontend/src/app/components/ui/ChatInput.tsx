@@ -13,23 +13,33 @@ interface ChatInputProps {
 export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { attachedFiles, setAttachedFiles, ingestFile } = useEngine();
+  const { attachedFiles, setAttachedFiles, attachedSources, setAttachedSources, ingestFile } = useEngine();
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const toastId = toast.loading(`Ingesting ${file.name}...`, {
-      description: 'Parsing and vectorizing document chunks.'
+      description: 'Parsing, chunking, and embedding the document — this can take a while for large or scanned files.'
     });
 
     try {
-      const data = await ingestFile(file);
-      
-      toast.success(`Successfully ingested ${file.name}`, {
-        id: toastId,
-        description: `Added ${data.chunksCount} chunks to the knowledge base.`
+      const data = await ingestFile(file, (status) => {
+        toast.loading(`Ingesting ${file.name}... (${status.progress}%)`, {
+          id: toastId,
+          description: `Status: ${status.status}`,
+        });
       });
+
+      toast.success(
+        data.status === 'duplicate' ? `${file.name} was already ingested` : `Successfully ingested ${file.name}`,
+        {
+          id: toastId,
+          description: data.status === 'duplicate'
+            ? 'Identical content already exists in the knowledge base — reusing it.'
+            : `Added ${data.chunkCount} chunk(s)${data.pageCount ? ` across ${data.pageCount} page(s)` : ''} to the knowledge base.`,
+        },
+      );
     } catch (err) {
       toast.error(`Failed to ingest ${file.name}`, {
         id: toastId,
@@ -54,10 +64,15 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const query = formData.get('query') as string;
-    
+
     if (query.trim() && !isSearching) {
       onSearch(query.trim());
-      // e.currentTarget.reset(); // Don't clear immediately, wait for response
+      // Attachments are ingested (and already persisted to the knowledge base)
+      // the moment they're attached, not held until send — so once the query
+      // is sent there's nothing left pending on either the text or the chips.
+      e.currentTarget.reset();
+      setAttachedFiles([]);
+      setAttachedSources([]);
     }
   };
 
@@ -82,9 +97,12 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
           {attachedFiles.map((file, i) => (
             <div key={i} className="flex items-center gap-2 bg-[#222] border border-[#444] rounded-xl px-3 py-1.5">
               <span className="text-xs font-mono text-gray-300 truncate max-w-[150px]">{file.name}</span>
-              <button 
-                type="button" 
-                onClick={() => setAttachedFiles(prev => prev.filter((_, idx) => idx !== i))}
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachedFiles(prev => prev.filter((_, idx) => idx !== i));
+                  setAttachedSources(prev => prev.filter((_, idx) => idx !== i));
+                }}
                 className="text-gray-500 hover:text-white transition-colors"
                 title="Remove attachment"
               >

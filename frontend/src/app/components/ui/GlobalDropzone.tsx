@@ -12,16 +12,26 @@ export function GlobalDropzone({ children }: { children: React.ReactNode }) {
     const file = acceptedFiles[0];
 
     const toastId = toast.loading(`Ingesting ${file.name}...`, {
-      description: 'Parsing and vectorizing document chunks.'
+      description: 'Parsing, chunking, and embedding the document — this can take a while for large or scanned files.'
     });
 
     try {
-      const data = await ingestFile(file);
-      
-      toast.success(`Successfully ingested ${file.name}`, {
-        id: toastId,
-        description: `Added ${data.chunksCount} chunks to the knowledge base.`
+      const data = await ingestFile(file, (status) => {
+        toast.loading(`Ingesting ${file.name}... (${status.progress}%)`, {
+          id: toastId,
+          description: `Status: ${status.status}`,
+        });
       });
+
+      toast.success(
+        data.status === 'duplicate' ? `${file.name} was already ingested` : `Successfully ingested ${file.name}`,
+        {
+          id: toastId,
+          description: data.status === 'duplicate'
+            ? 'Identical content already exists in the knowledge base — reusing it.'
+            : `Added ${data.chunkCount} chunk(s)${data.pageCount ? ` across ${data.pageCount} page(s)` : ''} to the knowledge base.`,
+        },
+      );
     } catch (err) {
       toast.error(`Failed to ingest ${file.name}`, {
         id: toastId,

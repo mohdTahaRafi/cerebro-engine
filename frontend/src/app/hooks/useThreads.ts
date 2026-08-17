@@ -30,8 +30,8 @@ export interface ThreadMessage {
 // GET/PATCH/DELETE /api/threads (phase 5 §10.1, §11 point "A useThreads.ts hook and a
 // thread sidebar are added for FR-CONV-04"). Deliberately owns no polling/caching layer
 // beyond plain state — the sidebar's list is small and refetched on the actions that
-// change it (send, rename, delete), matching how useCerebroSearch/useCerebroChat already
-// treat their own state in this codebase.
+// change it (send, rename, delete), matching how useCerebroChat already treats its own
+// state in this codebase.
 export function useThreads() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);

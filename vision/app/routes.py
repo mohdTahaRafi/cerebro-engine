@@ -28,8 +28,13 @@ PAGE_STORAGE_DIR = Path(os.environ.get("PAGE_STORAGE_DIR", "./storage/pages"))
 
 @router.get("/health", response_model=HealthResponse)
 def health(response: Response):
+    colpali_enabled = colpali.enabled()
     model_loaded = colpali.is_ready()
-    if not model_loaded:
+    # "Healthy" means "can serve what it is configured to serve". With ColPali switched
+    # off, OCR-only is the configured service, so an unloaded model is the expected
+    # steady state rather than a fault — reporting 503 forever would deadlock Compose's
+    # `depends_on: vision: service_healthy` and never start the backend at all.
+    if colpali_enabled and not model_loaded:
         # Weights are still downloading/loading — this is what the Compose healthcheck's
         # start_period is waiting out (phase 1 §2).
         response.status_code = 503
@@ -40,10 +45,11 @@ def health(response: Response):
         tesseract_version = "unknown"
 
     return HealthResponse(
-        status="up" if model_loaded else "down",
+        status="up" if (model_loaded or not colpali_enabled) else "down",
         model=_configured_model(),
         device=_configured_device(),
         modelLoaded=model_loaded,
+        colpaliEnabled=colpali_enabled,
         tesseractVersion=tesseract_version,
         uptimeSeconds=round(time.monotonic() - _START, 1),
     )
@@ -58,6 +64,11 @@ def _configured_device() -> str:
 
 
 def _require_model_ready():
+    if not colpali.enabled():
+        # Not an error for /embed_pages, which still has real OCR work to do — only
+        # /embed_query, which has nothing to return without the model, calls this via
+        # _require_colpali_enabled below.
+        return
     if not colpali.is_ready():
         # 503, matching /health's own readiness signal — a caller hitting this before
         # first-boot weight download finishes gets an honest "not ready yet", not a
@@ -121,6 +132,14 @@ def _process_pages(pdf_bytes: bytes, document_id: str, pages: list[int]) -> list
                 "wordCount": ocr_result["wordCount"],
             })
 
+        # Everything above this line — render, deskew, OCR, JPEG write — still runs with
+        # ColPali off. Only the embedding is skipped, so a scanned page keeps its OCR
+        # text (indexed as chunks by ingestDocument.js) and its stored image (so the
+        # answer can still show the page it cited); it simply has no visual vector, and
+        # is therefore retrievable by its text rather than its appearance.
+        if not colpali.enabled():
+            return [{**p, "multivector": None, "patchCount": 0} for p in partials]
+
         # One batched embedding call for every requested page, not one call per page —
         # embed_pages already chunks internally at PAGE_BATCH_SIZE (colpali.py §5.1).
         multivectors = colpali.embed_pages(images)
@@ -167,6 +186,16 @@ async def embed_pages_endpoint(
 # ── POST /embed_query (phase 4 §5.2, called from search.js §7.1) ────────────────────
 @router.post("/embed_query", response_model=EmbedQueryResponse)
 async def embed_query_endpoint(body: EmbedQueryRequest):
+    if not colpali.enabled():
+        # 503 rather than 404/501: the caller's correct reaction is identical to a vision
+        # outage — drop the visual branch and search text only — and search.js already
+        # implements exactly that. Returning it immediately (instead of the 5s client
+        # timeout an unreachable service costs) is why disabling ColPali makes queries
+        # faster rather than merely no slower.
+        raise HTTPException(
+            status_code=503,
+            detail="ColPali is disabled (COLPALI_ENABLED=false); visual retrieval is unavailable.",
+        )
     _require_model_ready()
     start = time.monotonic()
     multivector = await asyncio.to_thread(colpali.embed_query, body.query)

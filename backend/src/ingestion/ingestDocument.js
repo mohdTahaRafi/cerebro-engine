@@ -178,8 +178,15 @@ export async function ingestDocumentJob(job) {
     await updateProgress(doc, job, 95);
 
     // 6. Upsert pages ─────────────────────────────────────────── 95% → 100%
-    if (visualResults.length > 0) {
-      await vectorStore.upsertPages(visualResults, doc._id.toString(), doc.fileName);
+    // Only pages that actually carry a multivector. With COLPALI_ENABLED=false the vision
+    // service returns `multivector: null` for every page (vision/app/routes.py) — it did
+    // the render/deskew/OCR work but not the embedding. Those pages are already fully
+    // indexed as OCR chunks in step 4 and their images are already stored, so they stay
+    // searchable and citable; writing them here with a null vector would be rejected by
+    // Qdrant, and writing an empty list would create points that can never match.
+    const embeddablePages = visualResults.filter((p) => Array.isArray(p.multivector) && p.multivector.length > 0);
+    if (embeddablePages.length > 0) {
+      await vectorStore.upsertPages(embeddablePages, doc._id.toString(), doc.fileName);
     }
 
     await doc.updateOne({ status: 'ready', progress: 100, chunkCount: chunks.length, error: null });

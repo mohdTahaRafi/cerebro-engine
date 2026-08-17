@@ -71,6 +71,10 @@ services:
       # volume with a host bind) — nothing here is authoritative once MinIO has a copy.
       - page_staging:/storage/pages
     environment:
+      # See docker-compose.yml's note. Off by default here too: the reference deployment
+      # has no GPU (phase 6 §14), and a CPU-bound ColPali makes visual ingestion slower
+      # than any reasonable job timeout rather than merely slow.
+      COLPALI_ENABLED: ${COLPALI_ENABLED:-false}
       COLPALI_MODEL: vidore/colpali-v1.3
       COLPALI_DEVICE: cpu
       PAGE_STORAGE_DIR: /storage/pages

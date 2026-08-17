@@ -32,7 +32,19 @@ async def lifespan(app: FastAPI):
     # the ~6GB first-boot ColPali weight download takes. Once the background load
     # finishes, colpali.is_ready() flips true and /health starts reporting up — this
     # is what makes /health a meaningful readiness signal, not a liveness ping.
-    asyncio.create_task(_load_model_in_background())
+    # With COLPALI_ENABLED unset/false the weights are never downloaded or resident at
+    # all — that is where the ~6GB of RSS and the multi-GB first-boot download go, not
+    # just the per-page latency. /health reports up immediately in that mode (see
+    # routes.py), so Compose's service_healthy condition is satisfied without waiting out
+    # a start_period sized for a model that is not being loaded.
+    if colpali.enabled():
+        asyncio.create_task(_load_model_in_background())
+    else:
+        logger.info(
+            "[vision] COLPALI_ENABLED is false — serving OCR only. "
+            "Pages are still rendered, OCR'd and indexed as text; visual (ColPali) "
+            "retrieval is off. Set COLPALI_ENABLED=true on a GPU host to restore it."
+        )
     yield
 
 

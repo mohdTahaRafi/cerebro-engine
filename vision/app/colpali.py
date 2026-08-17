@@ -23,6 +23,29 @@ MAX_LOAD_ATTEMPTS = 30
 RETRY_DELAY_SECONDS = 5
 
 
+def enabled() -> bool:
+    """Whether ColPali page/query embedding runs at all.
+
+    Defaults to FALSE. ColPali is the only part of this service that needs a GPU to be
+    practical: measured on the reference host's CPU, the OCR path (rasterize, deskew,
+    language detect, tesseract) costs ~1.5s per page, while a single ColPali forward pass
+    for one page ran past 10 minutes. A 12-page scanned PDF is therefore ~18s with this
+    off versus well over an hour with it on, which is the difference between the visual
+    test suite being runnable on a laptop and not.
+
+    Switching it off is deliberately NOT the same as deleting the visual path. Pages are
+    still rendered, deskewed, OCR'd, stored as JPEGs, and indexed as text chunks, so
+    scanned documents remain searchable and citable — they are simply matched on their
+    OCR text rather than on their appearance. What is lost is retrieval of things OCR
+    cannot see: charts, diagrams, layout, stamps, signatures, handwriting.
+
+    Set COLPALI_ENABLED=true on a GPU host (with COLPALI_DEVICE=cuda) to restore it. No
+    code changes are needed in either service — the backend already degrades to text-only
+    when /embed_query is unavailable (backend/src/retrieval/search.js).
+    """
+    return os.environ.get("COLPALI_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+
+
 def load() -> tuple:
     """Idempotent, thread-safe model load. Called once at FastAPI startup.
 

@@ -170,3 +170,11 @@ backend/uploads/
 __pycache__/
 *.pyc
 *.pyo
+
+# ----------------------------------------------------------------------------
+# Phase 6 — benchmark output (regenerated every `npm run bench`; commit a
+# baseline explicitly via `npm run bench -- --save-baseline` if you want one
+# tracked for CI comparison, per backend/bench/README.md)
+# ----------------------------------------------------------------------------
+backend/bench/results/
+backend/bench/.tmp/

@@ -1,33 +1,33 @@
 import { useState, useCallback, useRef } from 'react';
 import { Upload, CheckCircle, AlertTriangle, FileText } from 'lucide-react';
 
-type IngestionStage = 
-  | 'idle' 
-  | 'chunking' 
-  | 'vectorizing' 
-  | 'syncing' 
-  | 'complete' 
-  | 'error';
+// Mirrors POST /api/documents + GET /api/documents/:id/status's real lifecycle (phase 6
+// §5.1: the legacy /api/ingest this used to hit no longer exists). 'idle' is the only
+// state with no in-flight document; everything else tracks a real Document row's status
+// field one-to-one, so this label is never a fabricated stage the backend never reports.
+type IngestionStage = 'idle' | 'queued' | 'processing' | 'ready' | 'failed';
 
 interface IngestionResult {
   fileName: string;
-  skipped: boolean;
-  chunksCreated: number;
-  processingTimeMs: number;
-  message: string;
+  chunkCount: number;
+  pageCount: number;
+  duplicate: boolean;
 }
 
 const STAGE_LABELS: Record<IngestionStage, string> = {
-  idle: 'DROP .TXT FILE TO INGEST',
-  chunking: 'Chunking document...',
-  vectorizing: 'Vectorizing...',
-  syncing: 'Syncing to Atlas...',
-  complete: 'INGESTION COMPLETE',
-  error: 'INGESTION FAILED'
+  idle: 'DROP DOCUMENT TO INGEST',
+  queued: 'Queued — waiting for a worker...',
+  processing: 'Parsing, chunking & embedding...',
+  ready: 'INGESTION COMPLETE',
+  failed: 'INGESTION FAILED',
 };
+
+const POLL_INTERVAL_MS = 1500;
+const POLL_TIMEOUT_MS = 5 * 60_000;
 
 export function IngestionZone() {
   const [stage, setStage] = useState<IngestionStage>('idle');
+  const [progress, setProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [result, setResult] = useState<IngestionResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -36,35 +36,52 @@ export function IngestionZone() {
   const ingest = useCallback(async (file: File) => {
     setResult(null);
     setErrorMsg(null);
-
-    // Simulate real-time progress states
-    setStage('chunking');
-    await new Promise(r => setTimeout(r, 600));
-    setStage('vectorizing');
-    await new Promise(r => setTimeout(r, 400));
-    setStage('syncing');
+    setProgress(0);
+    setStage('queued');
 
     try {
       const formData = new FormData();
       formData.append('document', file);
 
-      const response = await fetch('/api/ingest', {
-        method: 'POST',
-        body: formData,
-      });
-
+      const response = await fetch('/api/documents', { method: 'POST', body: formData });
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Upload failed');
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Ingestion failed');
+      if (data.status === 'duplicate') {
+        setResult({ fileName: data.fileName, chunkCount: 0, pageCount: 0, duplicate: true });
+        setStage('ready');
+        return;
       }
 
-      setResult(data);
-      setStage('complete');
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (Date.now() > deadline) throw new Error('Ingestion is taking longer than expected.');
+        const statusRes = await fetch(`/api/documents/${data.documentId}/status`);
+        const statusData = await statusRes.json();
+        setProgress(statusData.progress ?? 0);
+        setStage(statusData.status === 'queued' || statusData.status === 'processing' ? statusData.status : stage);
+
+        if (statusData.status === 'ready') {
+          setResult({
+            fileName: data.fileName, chunkCount: statusData.chunkCount,
+            pageCount: statusData.pageCount, duplicate: false,
+          });
+          setStage('ready');
+          return;
+        }
+        if (statusData.status === 'failed') {
+          throw new Error(statusData.error || 'Ingestion failed');
+        }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      }
     } catch (err: any) {
       setErrorMsg(err.message);
-      setStage('error');
+      setStage('failed');
     }
+    // stage is read but deliberately not a dependency — this loop drives its own
+    // transitions from the polled response, not from re-running on stage changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -79,9 +96,9 @@ export function IngestionZone() {
     if (file) ingest(file);
   }, [ingest]);
 
-  const isActive = stage !== 'idle' && stage !== 'complete' && stage !== 'error';
-  const isComplete = stage === 'complete';
-  const isError = stage === 'error';
+  const isActive = stage === 'queued' || stage === 'processing';
+  const isComplete = stage === 'ready';
+  const isError = stage === 'failed';
 
   return (
     <div className="flex flex-col gap-3 h-full font-mono text-xs">
@@ -108,7 +125,7 @@ export function IngestionZone() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.pdf"
+          accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.xls,.json"
           className="hidden"
           onChange={onFileChange}
         />
@@ -124,26 +141,18 @@ export function IngestionZone() {
 
         {/* Stage label */}
         <span className={`uppercase font-bold tracking-widest text-[10px] text-center px-2 ${
-          isComplete ? 'text-[#00FF41]' : 
-          isError ? 'text-[#FF003C]' : 
+          isComplete ? 'text-[#00FF41]' :
+          isError ? 'text-[#FF003C]' :
           isActive ? 'text-[#00FF41] animate-pulse' : 'text-gray-500'
         }`}>
           {STAGE_LABELS[stage]}
         </span>
 
-        {/* Active timeline indicator */}
+        {/* Real progress bar — driven by the Document row's own `progress` field
+            (ingestion/ingestDocument.js's band boundaries), not a fake timeout sequence. */}
         {isActive && (
-          <div className="flex gap-1.5 items-center">
-            {(['chunking', 'vectorizing', 'syncing'] as IngestionStage[]).map((s) => (
-              <div
-                key={s}
-                className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
-                  s === stage ? 'bg-[#00FF41] scale-125' : 
-                  (['chunking', 'vectorizing', 'syncing'].indexOf(s) < ['chunking', 'vectorizing', 'syncing'].indexOf(stage))
-                    ? 'bg-[#00FF41]/50' : 'bg-gray-700'
-                }`}
-              />
-            ))}
+          <div className="w-3/4 h-1 bg-[#111] border border-[#333]">
+            <div className="h-full bg-[#00FF41] transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
         )}
       </div>
@@ -153,19 +162,26 @@ export function IngestionZone() {
         <div className="border border-[#333] bg-black p-3 flex flex-col gap-1.5">
           <div className="text-gray-500 uppercase font-bold tracking-widest text-[10px] mb-1">Ingestion Summary</div>
           <div className="flex justify-between">
-            <span className="text-gray-400">File</span>
+            <span className="text-gray-400">Source</span>
             <span className="text-white truncate max-w-[140px]">{result.fileName}</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Chunks Created</span>
-            <span className="text-[#00FF41] font-bold">{result.chunksCreated}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Processing Time</span>
-            <span className="text-[#00FF41] font-bold">{result.processingTimeMs}ms</span>
-          </div>
-          {result.skipped && (
-            <div className="text-yellow-500 text-[10px] mt-1 uppercase font-bold tracking-wider">⚠ Skipped (already exists)</div>
+          {result.duplicate ? (
+            <div className="text-yellow-500 text-[10px] mt-1 uppercase font-bold tracking-wider">
+              ⚠ Identical content already ingested — reused existing document
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Chunks Created</span>
+                <span className="text-[#00FF41] font-bold">{result.chunkCount}</span>
+              </div>
+              {result.pageCount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-400">Pages</span>
+                  <span className="text-[#00FF41] font-bold">{result.pageCount}</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -179,7 +195,7 @@ export function IngestionZone() {
       {/* Reset */}
       {(isComplete || isError) && (
         <button
-          onClick={() => { setStage('idle'); setResult(null); setErrorMsg(null); }}
+          onClick={() => { setStage('idle'); setResult(null); setErrorMsg(null); setProgress(0); }}
           className="border border-[#333] bg-black text-gray-500 uppercase font-bold tracking-widest text-[10px] py-2 hover:border-[#00FF41] hover:text-[#00FF41] transition-all"
         >
           INGEST ANOTHER FILE

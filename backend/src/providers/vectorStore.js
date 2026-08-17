@@ -2,7 +2,7 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { v5 as uuidv5 } from 'uuid';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
-import { PREFETCH_LIMIT } from '../retrieval/constants.js';
+import { PREFETCH_LIMIT, HNSW_EF_SEARCH } from '../retrieval/constants.js';
 
 let _client = null;
 
@@ -229,30 +229,76 @@ function documentIdFilter(documentIds) {
 
 // Server-side fusion via Qdrant's Query API (phase 3 §3.1) — one HTTP round trip fuses
 // the dense and sparse branches with RRF, deleting the hand-rolled RRF loop the legacy
-// SearchService.js used to run in Node. `filter` is applied inside EACH prefetch branch
+// search service (deleted phase 6 §5.1) used to run in Node. `filter` is applied inside EACH prefetch branch
 // and again at the top level: applying it only at the top level would let each branch
 // fill its PREFETCH_LIMIT slots with out-of-scope documents that then get discarded,
 // leaving far fewer than PREFETCH_LIMIT in-scope candidates for fusion to work with.
+//
+// Phase 6 §2.3: the provenance panel needs to show which branch(es) — dense, sparse, or
+// both — actually produced each result. The fused query above cannot answer that on its
+// own: Qdrant's server-side RRF returns only the merged hit list, discarding which
+// prefetch branch(es) contributed a given point. Two additional membership-only queries
+// (`with_payload: false, with_vector: false` — just id lists, not a second hydration of
+// every candidate's stored text) run concurrently with the fused query rather than after
+// it, at the same PREFETCH_LIMIT the fused query's own prefetch branches use, so their
+// membership sets exactly match what fusion drew from. This is 3 round trips instead of
+// 1 (a deliberate cost accepted for honest attribution, not an oversight) — all three are
+// sub-30ms ANN/lookup queries against the same warm collection, negligible next to the
+// ~240ms rerank stage that follows.
 export async function hybridQuery({ denseVector, sparseVector, limit, documentIds = null }) {
   const filter = documentIdFilter(documentIds);
 
-  const res = await qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
-    prefetch: [
-      { query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter },
-      { query: sparseVector, using: 'sparse', limit: PREFETCH_LIMIT, filter },
-    ],
-    query: { fusion: 'rrf' },   // Qdrant computes Reciprocal Rank Fusion server-side, k=60
-    limit,
-    filter,
-    with_payload: true,
-    with_vector: false,        // never ship 1024 floats per hit back to Node
-  }));
+  const [fused, denseOnly, sparseOnly] = await Promise.all([
+    qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+      prefetch: [
+        // hnsw_ef only on the dense branch: sparse is served by an inverted index, which
+        // has no HNSW graph to explore and ignores the parameter.
+        { query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter, params: { hnsw_ef: HNSW_EF_SEARCH } },
+        { query: sparseVector, using: 'sparse', limit: PREFETCH_LIMIT, filter },
+      ],
+      query: { fusion: 'rrf' },   // Qdrant computes Reciprocal Rank Fusion server-side, k=60
+      limit,
+      filter,
+      with_payload: true,
+      with_vector: false,        // never ship 1024 floats per hit back to Node
+    })),
+    qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+      // Same hnsw_ef as the fused query's dense prefetch above — a membership set drawn at
+      // a different exploration width would not match what fusion actually drew from, and
+      // the provenance panel would attribute branches to the wrong results.
+      query: denseVector, using: 'dense', limit: PREFETCH_LIMIT, filter,
+      params: { hnsw_ef: HNSW_EF_SEARCH },
+      with_payload: false, with_vector: false,
+    })),
+    qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+      query: sparseVector, using: 'sparse', limit: PREFETCH_LIMIT, filter,
+      with_payload: false, with_vector: false,
+    })),
+  ]);
 
-  return res.points.map((p) => ({
-    pointId: String(p.id),
-    fusionScore: p.score,      // RRF score — a rank artifact, NOT a relevance measure
-    ...p.payload,
-  }));
+  const denseIds = new Set(denseOnly.points.map((p) => String(p.id)));
+  const sparseIds = new Set(sparseOnly.points.map((p) => String(p.id)));
+
+  return fused.points.map((p, i) => {
+    const id = String(p.id);
+    const inDense = denseIds.has(id);
+    const inSparse = sparseIds.has(id);
+    return {
+      pointId: id,
+      fusionScore: p.score,      // RRF score — a rank artifact, NOT a relevance measure
+      // Rank within this branch's own pre-rerank ordering (1-based) — NOT a rank across
+      // both chunks and pages, since fusionScore (RRF) and maxSimScore (late interaction,
+      // multivectorQuery below) are on incomparable scales, same reasoning as toPublicResult's
+      // "neither is ever compared to the other" (retrieval/search.js).
+      fusionRank: i + 1,
+      // Falls back to 'dense' only in the (should-not-happen) case where PREFETCH_LIMIT
+      // truncation makes the fused result's own id fall outside both membership sets —
+      // both membership queries share the fused query's own PREFETCH_LIMIT, so this is a
+      // defensive default, not the expected path.
+      branch: inDense && inSparse ? 'both' : inSparse && !inDense ? 'sparse' : 'dense',
+      ...p.payload,
+    };
+  });
 }
 
 // Total chunk count, optionally scoped to a set of documents — used by search.js to
@@ -312,14 +358,18 @@ export async function multivectorQuery({ queryMultivector, limit, documentIds = 
     using: 'colpali',
     limit,
     filter,
+    params: { hnsw_ef: HNSW_EF_SEARCH },   // same recall gap as hybridQuery's dense branch
+
     with_payload: true,
     with_vector: false,        // never ship a 1030x128 multivector per hit back to Node
   }));
 
-  return res.points.map((p) => ({
+  return res.points.map((p, i) => ({
     pointId: String(p.id),
     maxSimScore: p.score,      // late-interaction score — a rank artifact, NOT a
                                 // relevance measure, same status as hybridQuery's fusionScore
+    fusionRank: i + 1,          // rank within the ColPali branch's own pre-rerank ordering (phase 6 §2.3)
+    branch: 'colpali',
     ...p.payload,
   }));
 }
@@ -336,4 +386,11 @@ export async function deletePagesByDocument(documentId) {
   }));
 
   return { deletedPoints: before.count };
+}
+
+// Total page count — /health's `collections` field (phase 6 §7.1), the twin of
+// countPoints() above for the pages collection.
+export async function countPagePoints() {
+  const { count } = await client().count(config.qdrant.pagesCollection, { exact: true });
+  return count;
 }

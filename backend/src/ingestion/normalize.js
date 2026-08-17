@@ -1,6 +1,7 @@
-// Replaces TextSanitizer.js's ASCII-strip approach (phase 2 §4.5). The old sanitizer
-// NFKD-decomposed text and then stripped everything non-ASCII, which turned every accented
-// character into its unaccented base and erased non-Latin scripts outright. This is
+// Replaces the legacy sanitizer's ASCII-strip approach (phase 2 §4.5; that module was
+// deleted in Phase 6 §5.1). The old sanitizer NFKD-decomposed text and then stripped
+// everything non-ASCII, which turned every accented character into its unaccented base
+// and erased non-Latin scripts outright. This is
 // deliberately minimal: compose (not decompose), normalize line endings and horizontal
 // whitespace, de-hyphenate PDF line-wraps, cap blank-line runs — and nothing else. No
 // HTML-tag stripping (mangles "if x < 3 then y > 5"), no URL/email masking (destroys the

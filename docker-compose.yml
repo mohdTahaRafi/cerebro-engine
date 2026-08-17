@@ -50,6 +50,14 @@ services:
       - hf_cache:/root/.cache/huggingface   # persist ColPali weights across rebuilds
       - ./storage/pages:/storage/pages       # page images written here, read by Node
     environment:
+      # OFF by default: ColPali needs a GPU to be practical. Measured on this reference
+      # host's CPU, the OCR path costs ~1.5s/page while one ColPali forward pass for a
+      # single page ran past 10 minutes, which put the 12-page visual test fixture beyond
+      # any usable timeout. With this false the service still renders, deskews, OCRs and
+      # stores every page — scanned PDFs stay searchable via their OCR text — it only
+      # skips the visual embedding, so charts/diagrams/handwriting are no longer matchable
+      # by appearance. Set true (with COLPALI_DEVICE=cuda) on a GPU host to restore it.
+      COLPALI_ENABLED: ${COLPALI_ENABLED:-false}
       COLPALI_MODEL: vidore/colpali-v1.3
       COLPALI_DEVICE: cpu
       PAGE_STORAGE_DIR: /storage/pages

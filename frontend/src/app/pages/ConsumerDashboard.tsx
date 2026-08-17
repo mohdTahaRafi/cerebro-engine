@@ -51,7 +51,7 @@ function fromThreadSource(s: ThreadSource, i: number): DisplaySource {
 
 export function ConsumerDashboard() {
   const {
-    sources, answer, isGenerating, chatError, threadId,
+    sources, answer, isGenerating, chatError, threadId, attachedSources,
     askCerebro, loadThread, startNewThread, stopGenerating, regenerate,
   } = useEngine();
   const { fetchThread } = useThreads();
@@ -84,11 +84,11 @@ export function ConsumerDashboard() {
     const id = `live-${Date.now()}`;
     liveTurnId.current = id;
     setTurns((prev) => [...prev, { id, question: query, answer: '', sources: [], isStreaming: true }]);
-    // Attachments no longer scope retrieval here: /api/ask scopes by Mongo document _id
-    // (scopeDocumentIds), and attachedSources still holds the legacy /api/ingest upload
-    // path — a different id space the new pipeline doesn't read. See EngineContext's
-    // askCerebro doc comment.
-    askCerebro(query);
+    // Phase 6: attachedSources now holds real Mongo document _ids (EngineContext's
+    // ingestFile resolves once ingestion is 'ready', not at attach time) — the same id
+    // space /api/ask's scopeDocumentIds reads, so a question asked right after attaching
+    // a document is actually scoped to it.
+    askCerebro(query, attachedSources.length ? attachedSources : undefined);
   };
 
   const handleSelectThread = async (id: string) => {

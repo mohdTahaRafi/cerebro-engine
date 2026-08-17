@@ -29,7 +29,11 @@ export async function condenseNode(state, config) {
 
     return {
       condensedQuery: usable ? condensed : state.query,
-      timings: { condenseMs: Math.round(performance.now() - t0) },
+      // condenseStartAt (phase 6 §2.2): the absolute performance.now() instant this stage
+      // began, converted to an offset from the request origin by buildTelemetry. Emitted
+      // on both the success and failure paths — a condensation that failed still occupied
+      // real wall-clock time the waterfall must account for.
+      timings: { condenseMs: Math.round(performance.now() - t0), condenseStartAt: t0 },
       warnings: usable ? [] : ['Query condensation produced an unusable result; used the original question.'],
     };
   } catch (err) {
@@ -37,7 +41,7 @@ export async function condenseNode(state, config) {
     // fail the request — retrieval on the raw follow-up still usually works.
     return {
       condensedQuery: state.query,
-      timings: { condenseMs: Math.round(performance.now() - t0) },
+      timings: { condenseMs: Math.round(performance.now() - t0), condenseStartAt: t0 },
       warnings: [`Query condensation unavailable: ${err.message}`],
     };
   }

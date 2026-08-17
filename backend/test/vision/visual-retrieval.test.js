@@ -157,5 +157,23 @@ async function main() {
   await deleteDocument(upMixed.body.documentId);
 }
 
+// Every assertion below main() is about the ColPali branch specifically — points landing
+// in cerebro_pages, a visual page outranking text, deletion purging that collection. With
+// COLPALI_ENABLED=false (the default, see vision/app/colpali.py's enabled()) none of that
+// exists by design: scanned pages are indexed as OCR chunks instead. Skipping is the
+// honest outcome there — failing would report a defect where there is a configuration
+// choice, and passing a gutted version would claim coverage this run did not have.
+const visionHealth = await fetch(`${process.env.VISION_SERVICE_URL ?? 'http://localhost:8100'}/health`)
+  .then((r) => r.json())
+  .catch(() => null);
+
+if (visionHealth && visionHealth.colpaliEnabled === false) {
+  console.log(
+    '[visual-retrieval.test] SKIP — COLPALI_ENABLED=false (OCR-only mode); '
+    + 'this suite verifies the ColPali branch. Set COLPALI_ENABLED=true on a GPU host to run it.',
+  );
+  process.exit(0);
+}
+
 await main();
 console.log('[visual-retrieval.test] ALL PASS');

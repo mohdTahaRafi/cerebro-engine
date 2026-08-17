@@ -7,9 +7,22 @@ export async function retrieveNode(state) {
   const query = state.condensedQuery ?? state.query;
   const t0 = performance.now();
 
-  const { candidates, timings } = await retrieveCandidates(query, {
+  const { candidates, timings, candidatesRetrieved, candidatesAfterMerge } = await retrieveCandidates(query, {
     documentIds: state.scopeDocumentIds,
   });
 
-  return { candidates, timings: { ...timings, retrieveTotalMs: Math.round(performance.now() - t0) } };
+  // Forwarded verbatim, including each stage's `*StartAt` absolute instant (phase 6 §2.2):
+  // those are raw performance.now() values from this same process, so they stay directly
+  // comparable against the request origin ask.js measured, and buildTelemetry converts them
+  // to offsets there. retrieveCandidates' timer deliberately reports no `totalMs` of its
+  // own — only the route that owns the whole request can measure that (see timer.js).
+  return {
+    candidates,
+    timings: {
+      ...timings,
+      candidatesRetrieved,
+      candidatesAfterMerge,
+      retrieveTotalMs: Math.round(performance.now() - t0),
+    },
+  };
 }

@@ -84,6 +84,11 @@ export const config = {
   tracing: {
     enabled: process.env.LANGCHAIN_TRACING_V2 === 'true',
     project: process.env.LANGCHAIN_PROJECT ?? 'cerebro',
+    // Phase 6 §2.4: the advanced console's LangSmith deep link needs the org id to build
+    // https://smith.langchain.com/o/{org}/projects/p/{project}/r/{runId} — LangSmith has
+    // no API to resolve it from just an API key, so it is operator-supplied. Left unset,
+    // the console renders the run id without a clickable link rather than a broken one.
+    orgId: process.env.LANGSMITH_ORG_ID || null,
   },
 };
 

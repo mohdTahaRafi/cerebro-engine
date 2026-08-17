@@ -1,7 +1,7 @@
 // POST /api/search (phase 3 §8). Mounts at the same path the legacy MongoDB-backed
 // handler served — this is the first cutover point: /api/search now reads Qdrant instead
-// of MongoDB. SearchService.js remains on disk (no longer routed to) until Phase 6
-// deletes it once this path has soaked.
+// of MongoDB. The legacy handler's module was deleted in Phase 6 (§5.1) once this path
+// had soaked.
 import express from 'express';
 import { search } from '../../retrieval/search.js';
 import { MAX_QUERY_CHARS, TOP_N_DEFAULT, TOP_N_MIN, TOP_N_MAX } from '../../retrieval/constants.js';

@@ -6,6 +6,7 @@ class HealthResponse(BaseModel):
     model: str
     device: str
     modelLoaded: bool
+    colpaliEnabled: bool        # false ⇒ OCR-only mode; modelLoaded is then expected false
     tesseractVersion: str
     uptimeSeconds: float
 
@@ -39,7 +40,7 @@ class EmbedPageResult(BaseModel):
     ocrQuality: str        # "good" | "poor"
     meanConfidence: float
     wordCount: int
-    multivector: list[list[float]]
+    multivector: list[list[float]] | None   # None ⇒ COLPALI_ENABLED=false; OCR fields still populated
     patchCount: int
 
 

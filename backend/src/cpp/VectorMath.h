@@ -1,9 +1,14 @@
 /**
  * @file VectorMath.h
- * @brief Data contract and base class for Cerebro Vector Search Core.
- * 
- * This file defines the interface between Node.js and the custom C++ 
- * vector search implementation.
+ * @brief Dot-product primitive used by Cerebro's vector search core.
+ *
+ * There is no persistent, server-side vector index anywhere in this addon:
+ * CerebroEngine::SearchVectors (VectorSearch.cpp) is a stateless brute-force
+ * scan — the caller rebuilds and passes in the full candidate buffer on every
+ * single call. SimdDotProduct below is the per-call primitive that scan is
+ * built on. This addon has not served live queries since Phase 3 (Qdrant
+ * took over hybrid retrieval); it survives as the benchmark artifact
+ * bench/cppVsQdrant.js measures (phase 6 §3, §5.2).
  */
 
 #ifndef VECTOR_MATH_H
@@ -14,35 +19,17 @@
 namespace Cerebro {
 
 /**
- * @class VectorSearch
- * @brief High-performance vector management and similarity search.
+ * @brief Dot product of two equal-length float vectors, dispatched at
+ * runtime to an AVX2/FMA implementation when the host CPU supports it, or a
+ * portable scalar fallback otherwise (see VectorMath.cpp). Safe to call on
+ * any CPU — never assumes AVX2 is present.
+ *
+ * @param a Pointer to a `dim`-length float array.
+ * @param b Pointer to a `dim`-length float array.
+ * @param dim Number of elements in each of `a` and `b`.
+ * @return float Computed dot product.
  */
-class VectorSearch {
-public:
-    /**
-     * @brief Adds a batch of document vectors to the search index.
-     * 
-     * @param vectorData Pointer to the start of a flattened 1D array of float32 values.
-     *                   Data is expected to be memory-contiguous and L2-normalized 
-     *                   from the Node.js layer.
-     * @param totalVectors The number of discrete document chunks in the buffer.
-     * @param dimensions The vector space dimensionality (Expected: 384).
-     */
-    virtual void AddDocumentVectors(const float* vectorData, 
-                                   size_t totalVectors, 
-                                   size_t dimensions) = 0;
-
-    virtual ~VectorSearch() {}
-};
-
-/**
- * @brief High-performance SIMD-accelerated Dot Product.
- * 
- * @param a Pointer to 384-length float array.
- * @param b Pointer to 384-length float array.
- * @return float Computed similarity score.
- */
-float SimdDotProduct(const float* a, const float* b);
+float SimdDotProduct(const float* a, const float* b, size_t dim);
 
 } // namespace Cerebro
 

@@ -6,11 +6,6 @@
 
 namespace Cerebro {
 
-class VectorSearchImpl : public VectorSearch {
-public:
-    void AddDocumentVectors(const float* vectorData, size_t totalVectors, size_t dimensions) override;
-};
-
 class CerebroEngine : public Napi::ObjectWrap<CerebroEngine> {
 public:
     static Napi::Object Init(Napi::Env env, Napi::Object exports);

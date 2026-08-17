@@ -23,25 +23,23 @@
       },
       "msvs_settings": {
         "VCCLCompilerTool": {
-          "ExceptionHandling": 1,
-          "AdditionalOptions": ["/arch:AVX2"]
+          "ExceptionHandling": 1
         }
       },
       "defines": ["NAPI_CPP_EXCEPTIONS"],
       "conditions": [
         ["OS=='linux'", {
-          "cflags_cc": ["-std=c++17", "-mavx2", "-mfma"]
+          "cflags_cc": ["-std=c++17"]
         }],
         ["OS=='mac'", {
           "xcode_settings": {
-            "CLANG_CXX_LANGUAGE_STANDARD": "c++17",
-            "OTHER_CPLUSPLUSFLAGS": ["-mavx2", "-mfma"]
+            "CLANG_CXX_LANGUAGE_STANDARD": "c++17"
           }
         }],
         ["OS=='win'", {
           "msvs_settings": {
             "VCCLCompilerTool": {
-              "AdditionalOptions": ["/std:c++17", "/arch:AVX2"]
+              "AdditionalOptions": ["/std:c++17"]
             }
           }
         }]

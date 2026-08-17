@@ -1,14 +1,18 @@
 import path from 'path';
+import fs from 'fs/promises';
 import { UnrecoverableError } from 'bullmq';
 import { Document } from '../models/Document.js';
 import * as parser from '../providers/parser.js';
 import * as embeddings from '../providers/embeddings.js';
 import * as vectorStore from '../providers/vectorStore.js';
 import * as visionService from '../providers/visionService.js';
+import * as storage from '../providers/storage.js';
 import { chunkPages } from './chunker.js';
 import { rollbackDocument } from './rollback.js';
 import { classify } from './errors.js';
 import { recordUsage } from '../telemetry/usage.js';
+import { ingestJobDuration } from '../telemetry/metrics.js';
+import { config } from '../config/index.js';
 
 // Keeps BullMQ's own job.progress (internal queue bookkeeping) and the Document row's
 // `progress` field (what GET /api/documents/:id and :id/status actually serve to the
@@ -35,8 +39,56 @@ async function embedVisualPages(doc, pages, job) {
   }
 }
 
+// Phase 6 §8, §12: the Python vision service has no S3 awareness of its own — it always
+// writes each rendered page JPEG to PAGE_STORAGE_DIR on local disk (vision/app/routes.py's
+// `_process_pages`), a decision that keeps the vision container's job purely computational
+// and avoids re-implementing storage.js's driver selection in a second language. In
+// production (STORAGE_DRIVER=s3), docker-compose.prod.yml mounts that same local path as a
+// shared scratch volume into *this* container too — visionResults[].imageUri is already
+// storage.js's own key format ("pages/<documentId>/<page>.jpg", routes.py's literal
+// construction), so once the page is written there this reads it back off the shared volume
+// and uploads it through the real storage driver, then deletes the staging copy.
+//
+// Deleting matters: without it the shared volume grows without bound, keeping a full second
+// copy of every page image ever ingested for the lifetime of the deployment, with nothing
+// that would ever reclaim it (document deletion routes through storage.deletePrefix, which
+// under the S3 driver only touches the bucket). The staging copy is scratch space for one
+// hand-off, not a tier of storage.
+//
+// On STORAGE_DRIVER=filesystem this is skipped entirely rather than run as a read-then-write
+// of a file onto itself: there, PAGE_STORAGE_DIR *is* the storage backend, so the vision
+// service has already written the page to its canonical, authoritative location — and
+// deleting the "staging" copy would delete the only copy.
+async function syncPageImagesToStorage(visionResults) {
+  if (visionResults.length === 0 || config.storage.driver !== 's3') return;
+
+  for (const page of visionResults) {
+    const stagingPath = path.join(config.storage.pagesDir, '..', page.imageUri);
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const buf = await fs.readFile(stagingPath);
+      // eslint-disable-next-line no-await-in-loop
+      await storage.put(page.imageUri, buf);
+      // eslint-disable-next-line no-await-in-loop
+      await fs.unlink(stagingPath).catch((err) => {
+        // The upload succeeded, which is what correctness depends on — a staging file that
+        // could not be removed is a disk-space concern to log, not a reason to fail or
+        // retry an ingestion that has otherwise completed.
+        console.warn(`[ingest] page image ${page.imageUri} uploaded but staging copy remains: ${err.message}`);
+      });
+    } catch (err) {
+      // A page whose image failed to sync still has its OCR text and multivector
+      // indexed below — it degrades to "citable but not viewable" rather than failing
+      // the whole document, the same asymmetry embedVisualPages' own catch above accepts
+      // for a vision-service outage.
+      console.warn(`[ingest] failed to sync page image ${page.imageUri} to storage: ${err.message}`);
+    }
+  }
+}
+
 export async function ingestDocumentJob(job) {
   const { documentId } = job.data;
+  const jobT0 = performance.now();
   const doc = await Document.findById(documentId);
   if (!doc) throw new UnrecoverableError(`Document ${documentId} no longer exists`);
 
@@ -79,6 +131,7 @@ export async function ingestDocumentJob(job) {
     let visualResults = [];
     if (routing.visualPages.length > 0) {
       visualResults = await embedVisualPages(doc, routing.visualPages, job);
+      await syncPageImagesToStorage(visualResults);
     }
     await updateProgress(doc, job, 75);
 
@@ -125,14 +178,22 @@ export async function ingestDocumentJob(job) {
     await updateProgress(doc, job, 95);
 
     // 6. Upsert pages ─────────────────────────────────────────── 95% → 100%
-    if (visualResults.length > 0) {
-      await vectorStore.upsertPages(visualResults, doc._id.toString(), doc.fileName);
+    // Only pages that actually carry a multivector. With COLPALI_ENABLED=false the vision
+    // service returns `multivector: null` for every page (vision/app/routes.py) — it did
+    // the render/deskew/OCR work but not the embedding. Those pages are already fully
+    // indexed as OCR chunks in step 4 and their images are already stored, so they stay
+    // searchable and citable; writing them here with a null vector would be rejected by
+    // Qdrant, and writing an empty list would create points that can never match.
+    const embeddablePages = visualResults.filter((p) => Array.isArray(p.multivector) && p.multivector.length > 0);
+    if (embeddablePages.length > 0) {
+      await vectorStore.upsertPages(embeddablePages, doc._id.toString(), doc.fileName);
     }
 
     await doc.updateOne({ status: 'ready', progress: 100, chunkCount: chunks.length, error: null });
     if (totalTokens > 0) {
       await recordUsage({ provider: 'cohere', operation: 'embed', inputTokens: totalTokens, documentId });
     }
+    ingestJobDuration.observe({ outcome: 'success' }, (performance.now() - jobT0) / 1000);
   } catch (err) {
     // Atomicity (NFR-REL-03): remove every trace before recording the failure, so a
     // failed document is never partially queryable and a retry starts from clean state.
@@ -151,6 +212,10 @@ export async function ingestDocumentJob(job) {
     await Document.findByIdAndUpdate(documentId, {
       status: 'failed', progress: 0, error: err.message, chunkCount: 0,
     });
+    // Recorded per attempt, not per document: a transient failure BullMQ later retries
+    // successfully still produces one real 'failure' sample for how long that attempt ran
+    // before it errored, same as any other outcome-labeled measurement.
+    ingestJobDuration.observe({ outcome: 'failure' }, (performance.now() - jobT0) / 1000);
     throw classify(err);
   }
 }

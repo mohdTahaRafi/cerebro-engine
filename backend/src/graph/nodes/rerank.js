@@ -20,20 +20,32 @@ export async function rerankNode(state) {
 
   if (state.candidates.length === 0) {
     const corpusEmpty = (await vectorStore.countPoints()) === 0;
-    return { sources: [], emptyReason: corpusEmpty ? 'empty_corpus' : 'no_relevant_matches' };
+    return {
+      sources: [],
+      emptyReason: corpusEmpty ? 'empty_corpus' : 'no_relevant_matches',
+      timings: { candidatesAfterFloor: 0, rerankSkipped: false },
+    };
   }
 
   const { ranked, skipped } = await rerankOrDegrade(query, state.candidates, TOP_N_SOURCES);
   const filtered = ranked.filter((r) => r.relevanceScore === null || r.relevanceScore >= RELEVANCE_FLOOR);
   // toPublicResult (retrieval/search.js) is the same projection /api/search returns —
   // the generation prompt (generate.js's buildUserMessage) and /api/ask's `sources` SSE
-  // event both read this shape (kind, text, imageUri, ...), never the raw candidate.
-  const sources = filtered.map(toPublicResult);
+  // event both read this shape (kind, text, imageUri, branch, fusionRank, finalRank, ...),
+  // never the raw candidate. finalRank is stamped here (phase 6 §2.3) from the post-rerank,
+  // post-floor position — the same "how far reranking moved each candidate" signal
+  // /api/search reports.
+  const sources = filtered.map((r, i) => toPublicResult({ ...r, finalRank: i + 1 }));
 
   return {
     sources,
     emptyReason: sources.length === 0 ? 'no_relevant_matches' : null,
-    timings: { rerankMs: Math.round(performance.now() - t0) },
+    timings: {
+      rerankMs: Math.round(performance.now() - t0),
+      rerankStartAt: t0,                      // phase 6 §2.2 — see pipelineTelemetry.js
+      candidatesAfterFloor: sources.length,
+      rerankSkipped: skipped,
+    },
     warnings: skipped ? ['Reranking was unavailable; results are in fusion order.'] : [],
   };
 }

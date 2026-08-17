@@ -1,40 +1,62 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { useCerebroSearch } from '../hooks/useCerebroSearch';
 import { useCerebroChat, type ChatSource, type ChatTelemetry } from '../hooks/useCerebroChat';
+import type { LangSmithLink } from '../components/core/TelemetryTypes';
 
-// Matches the real backend response from POST /api/ingest (see IngestionService.js).
+// Matches POST /api/documents' response (backend/src/api/routes/documents.js) — replaces
+// the legacy /api/ingest contract (chunksCount/processingTimeS/source) that route no
+// longer exists to serve (phase 6 §5.1, §5.3: /api/ingest and IngestionService.js were
+// deleted this phase). Ingestion here is async: this is the *enqueue* response, not a
+// finished result — see DocumentStatus / pollDocumentStatus below for what happens after.
 export interface IngestionResponse {
-  success: boolean;
-  chunksCount: number;
-  processingTimeS: number;
-  source: string;
-  message?: string; // present on the "no content found" early-exit path
+  documentId: string;
+  status: 'queued' | 'duplicate';
+  fileName: string;
+  duplicateOf?: string;
+  message?: string;
+}
+
+// Matches GET /api/documents/:id/status.
+export interface DocumentStatus {
+  status: 'queued' | 'processing' | 'ready' | 'failed' | 'duplicate';
+  progress: number;
+  error: string | null;
+  chunkCount: number;
+  pageCount: number;
+}
+
+const POLL_INTERVAL_MS = 1500;
+// Bounds how long a caller waits for ingestion to finish before giving up on the promise
+// (the job itself keeps running server-side either way — BullMQ owns that lifecycle, not
+// this poll loop). Generous relative to architecture's own budgets (30s text, ~6s/page
+// visual) to comfortably cover a multi-page scanned document without the UI declaring
+// failure on something that is still legitimately in progress.
+const POLL_TIMEOUT_MS = 5 * 60_000;
+
+async function pollDocumentStatus(
+  documentId: string,
+  onProgress?: (s: DocumentStatus) => void,
+): Promise<DocumentStatus> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const res = await fetch(`/api/documents/${documentId}/status`);
+    const data: DocumentStatus = await res.json();
+    onProgress?.(data);
+    if (data.status === 'ready' || data.status === 'failed') return data;
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  throw new Error('Ingestion is taking longer than expected; check the document list for its status.');
 }
 
 interface EngineState {
-  // Search state
-  results: any[];
-  isSearching: boolean;
-  telemetry: any;
-  isCircuitOpen: boolean;
-  searchTime?: number;
-  totalChunks?: number;
-  error: string | null;
-  performSearch: (q: string, scopeSources?: string[]) => Promise<void>;
-  
-  // Chat state
+  // Chat state (the conversational RAG pipeline — phase 5/6)
   answer: string;
   sources: ChatSource[];
   isGenerating: boolean;
   chatError: string | null;
   threadId: string | null;
   chatTelemetry: ChatTelemetry | null;
-  // scopeDocumentIds, not scopeSources (phase 5 §11 point 2): /api/ask scopes retrieval
-  // by Mongo document _id, the id /api/documents assigns — not the legacy /api/ingest
-  // upload path attachedSources still holds. Attaching a file therefore no longer scopes
-  // a question to it until the ingestion UI itself is migrated onto /api/documents (a
-  // Phase 2/3 frontend gap this phase does not touch); the param exists for whoever
-  // provides real document ids.
+  runId: string | null;
+  langsmith: LangSmithLink | null;
   askCerebro: (q: string, scopeDocumentIds?: string[]) => Promise<void>;
   loadThread: (id: string) => void;
   startNewThread: () => void;
@@ -44,69 +66,73 @@ interface EngineState {
   // Upload state
   attachedFiles: File[];
   setAttachedFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  // metadata.source values (legacy /api/ingest upload paths) for the currently attached
-  // file(s). No longer passed to askCerebro as of phase 5: /api/ask scopes by Mongo
-  // document _id, an id space the legacy /api/ingest response never returns. Tracked
-  // here for the attachment chips' display/clear lifecycle in ChatInput; not currently
-  // consumed as a scope by any request.
+  // Document ids (Mongo _id from POST /api/documents) for attachments that have finished
+  // ingesting and are ready to be searched — populated once ingestFile's returned promise
+  // resolves, not at attach time. Passed to askCerebro as scopeDocumentIds so a question
+  // asked right after an attachment is actually scoped to it (phase 6 closes the gap phase
+  // 5 left open: "attachments no longer scope retrieval... a Phase 2/3 frontend gap this
+  // phase does not touch").
   attachedSources: string[];
   setAttachedSources: React.Dispatch<React.SetStateAction<string[]>>;
-  ingestFile: (file: File) => Promise<IngestionResponse>;
+  // Enqueues the upload, then polls until the document reaches 'ready' (or throws on
+  // 'failed'/timeout) — the returned promise settles once the document is actually
+  // searchable, not merely accepted. Callers (ChatInput's attach flow) hold a loading
+  // toast open for exactly that whole span, which is the honest UX for an async pipeline.
+  ingestFile: (file: File, onProgress?: (s: DocumentStatus) => void) => Promise<IngestionResponse & { chunkCount: number; pageCount: number }>;
 }
 
 const EngineContext = createContext<EngineState | undefined>(undefined);
 
 export function EngineProvider({ children }: { children: ReactNode }) {
-  const { performSearch, isSearching, results, telemetry: searchTelemetry, isCircuitOpen, error: searchError } = useCerebroSearch();
   const {
-    answer, sources, isGenerating, error: chatError, threadId, telemetry: chatTelemetry,
+    answer, sources, isGenerating, error: chatError, threadId, telemetry: chatTelemetry, runId, langsmith,
     askCerebro, loadThread, startNewThread, stopGenerating, regenerate,
   } = useCerebroChat();
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachedSources, setAttachedSources] = useState<string[]>([]);
 
-  const ingestFile = async (file: File): Promise<IngestionResponse> => {
-    // We import toast dynamically or assume it's handled by the components
-    // Actually, we can just return a promise and let the component handle the toast
-    // But since it's global, let's just do it here and import toast
+  const ingestFile: EngineState['ingestFile'] = async (file, onProgress) => {
     const formData = new FormData();
     formData.append('document', file);
 
-    // Optimistically add to UI
-    setAttachedFiles(prev => [...prev, file]);
+    // Optimistically add to UI — removed again below if the enqueue call itself fails.
+    setAttachedFiles((prev) => [...prev, file]);
 
-    const res = await fetch('/api/ingest', {
-      method: 'POST',
-      body: formData,
-    });
+    const res = await fetch('/api/documents', { method: 'POST', body: formData });
+    const data: IngestionResponse = await res.json();
 
     if (!res.ok) {
-      setAttachedFiles(prev => prev.filter(f => f.name !== file.name));
-      throw new Error('Ingestion failed');
+      setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name));
+      throw new Error((data as any)?.error || 'Upload failed');
     }
-    const data: IngestionResponse = await res.json();
-    // Tracked for the attachment chip's display/clear lifecycle only (see the
-    // attachedSources field comment above) — not currently used to scope a question.
-    if (data.source) {
-      setAttachedSources(prev => [...prev, data.source]);
+
+    // A duplicate resolves immediately against the existing (already-ready) document —
+    // nothing to poll, and it is already searchable under duplicateOf's id.
+    if (data.status === 'duplicate') {
+      const targetId = data.duplicateOf ?? data.documentId;
+      setAttachedSources((prev) => [...prev, targetId]);
+      return { ...data, chunkCount: 0, pageCount: 0 };
     }
-    return data;
+
+    const final = await pollDocumentStatus(data.documentId, onProgress);
+    if (final.status === 'failed') {
+      setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name));
+      throw new Error(final.error || 'Ingestion failed');
+    }
+
+    setAttachedSources((prev) => [...prev, data.documentId]);
+    return { ...data, status: 'ready' as any, chunkCount: final.chunkCount, pageCount: final.pageCount };
   };
 
   const value: EngineState = {
-    results,
-    isSearching,
-    telemetry: searchTelemetry,
-    isCircuitOpen,
-    error: searchError,
-    performSearch,
-
     answer,
     sources,
     isGenerating,
     chatError,
     threadId,
     chatTelemetry,
+    runId,
+    langsmith,
     askCerebro,
     loadThread,
     startNewThread,
@@ -117,7 +143,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     setAttachedFiles,
     attachedSources,
     setAttachedSources,
-    ingestFile
+    ingestFile,
   };
 
   return (

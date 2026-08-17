@@ -1,0 +1,222 @@
+# Production stack (phase 6 §8, task 6.19). A complete, standalone compose file — not an
+# override of docker-compose.yml — so `docker compose -f docker-compose.prod.yml up -d
+# --wait` is the entire deployment command the milestone describes. Adds to the dev stack:
+# the Node backend as a container, MinIO for page images, Caddy for TLS termination, and
+# resource limits on every service.
+#
+# Before running: `cd frontend && npm run build` (Caddy serves the static bundle from a
+# bind mount, not a Node build step inside its own container — see Caddyfile's header
+# comment) and copy `.env.example` to `.env` in this directory, filling in every value.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__STORAGE__QUANTIZATION__ALWAYS_RAM: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        # 100k points x 1024 dims x 4B (dense) + sparse postings + HNSW graph overhead —
+        # comfortable headroom above the ~1.5G a corpus that size actually needs.
+        limits: { memory: 4G }
+
+  mongo:
+    image: mongo:7.0
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        # Document/Message/Conversation/UsageEvent metadata only — no vectors live here
+        # since Phase 3's Qdrant cutover.
+        limits: { memory: 1G }
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        # BullMQ's ingest queue plus rate-limit counters (backend/src/api/middleware/
+        # rateLimit.js) — small, bursty, never this stack's bottleneck.
+        limits: { memory: 512M }
+
+  vision:
+    build: ./vision
+    volumes:
+      - hf_cache:/root/.cache/huggingface   # persist ColPali weights across rebuilds
+      # Phase 6 §8, §12: shared with `backend` below — the vision service has no S3
+      # awareness of its own and always writes page JPEGs to this local path
+      # (vision/app/routes.py); ingestDocument.js's syncPageImagesToStorage() reads them
+      # from here and re-uploads through storage.js's S3 driver. Ephemeral (not a named
+      # volume with a host bind) — nothing here is authoritative once MinIO has a copy.
+      - page_staging:/storage/pages
+    environment:
+      COLPALI_MODEL: vidore/colpali-v1.3
+      COLPALI_DEVICE: cpu
+      PAGE_STORAGE_DIR: /storage/pages
+      OMP_NUM_THREADS: "4"
+      HF_HUB_DISABLE_XET: "1"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 20          # 20 x 15s = 5 min; first boot downloads ~3 GB of ColPali weights
+      start_period: 120s
+    restart: unless-stopped
+    deploy:
+      resources:
+        # Hard ceiling above the 6 GB measured peak from Phase 4 §11. Without a limit,
+        # an OOM here takes the host down instead of just the container.
+        limits: { memory: 8G }
+
+  backend:
+    build: ./backend
+    volumes:
+      - page_staging:/storage/pages   # same shared scratch volume as vision — see that service's comment
+    # Amended during Phase 6 verification (§16): `host.docker.internal` does NOT resolve on
+    # Linux by default — that resolution is a Docker Desktop convenience (macOS/Windows).
+    # Verified live: `docker run --rm alpine getent hosts host.docker.internal` failed with
+    # no entry until this exact `extra_hosts` line was added, at which point it resolved to
+    # the host's docker0 bridge address. Without it, LLM_PROVIDER=ollama pointed at the
+    # default OLLAMA_API_URL below would fail every generation call on any Linux host —
+    # which is the platform docker-compose.yml's own qdrant healthcheck (`bash -c ':>
+    # /dev/tcp/...'`) and this project's development instructions already assume.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      MONGO_URI: mongodb://mongo:27017/cerebro
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379
+      VISION_SERVICE_URL: http://vision:8100
+      COHERE_API_KEY: ${COHERE_API_KEY:?COHERE_API_KEY is required}
+      LLAMA_CLOUD_API_KEY: ${LLAMA_CLOUD_API_KEY:?LLAMA_CLOUD_API_KEY is required}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      OLLAMA_API_URL: ${OLLAMA_API_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2-vision:11b}
+      STORAGE_DRIVER: s3
+      PAGE_STORAGE_DIR: /storage/pages
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: cerebro-pages
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-cerebro}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGSMITH_ORG_ID: ${LANGSMITH_ORG_ID:-}
+      # Phase 6 §6.2: the CORS allowlist — Caddy and the backend share one public origin
+      # (Caddyfile's `handle /api/*` block, amended §16.6, proxies to this container under
+      # the same domain the SPA is served from), so this is the only entry needed for the
+      # browser app itself; add more, comma-separated, for any additional trusted origin.
+      CORS_ALLOWED_ORIGINS: https://${DOMAIN:?DOMAIN is required}
+    depends_on:
+      qdrant: { condition: service_healthy }
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      vision: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    # Healthcheck inherited from backend/Dockerfile's HEALTHCHECK instruction — not
+    # redeclared here, so there is exactly one definition of "is the backend healthy."
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 2G }
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - minio_data:/data
+    ports:
+      # Admin console only. The S3 API (9000) stays off the host entirely — `backend` is
+      # the only client, and it reaches MinIO over the internal Docker network at
+      # http://minio:9000, never through a published port.
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 512M }
+
+  # One-shot: creates the bucket backend/src/providers/storage.js's S3 driver writes to.
+  # Exits after running; `--wait` treats a zero-exit one-shot container as satisfied rather
+  # than waiting on it to stay "running."
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
+      mc mb --ignore-existing local/cerebro-pages
+      "
+    restart: "no"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Populated by `cd frontend && npm run build` — see this file's header comment and
+      # Caddyfile's own. Read-only: Caddy only ever serves this, never writes to it.
+      - ./frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      backend: { condition: service_healthy }
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
+volumes:
+  qdrant_data:
+  mongo_data:
+  redis_data:
+  hf_cache:
+  minio_data:
+  page_staging:
+  caddy_data:
+  caddy_config:

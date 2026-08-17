@@ -1,0 +1,24 @@
+# LOCAL VERIFICATION ONLY — not part of the shipped production config (docker-compose.prod.yml
+# and Caddyfile). Real public ACME/Let's Encrypt TLS issuance is untestable in this sandbox:
+# there is no publicly-resolvable DNS record for any domain pointed at this host, and Let's
+# Encrypt's HTTP-01/TLS-ALPN-01 challenges both require exactly that. `tls internal` swaps in
+# Caddy's own local CA instead — everything else (the /api/* routing, flush_interval -1
+# scoping, the SPA catch-all) is identical to the real Caddyfile, so this exercises that
+# routing logic for real while only substituting how the certificate itself is obtained.
+{$DOMAIN} {
+    tls internal
+
+    encode gzip
+
+    handle /api/* {
+        reverse_proxy backend:5000 {
+            flush_interval -1
+        }
+    }
+
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

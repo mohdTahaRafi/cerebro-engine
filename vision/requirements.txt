@@ -1,6 +1,12 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
+# Required by routes.py's /embed_pages, which takes multipart/form-data (Form fields plus
+# the PDF as an UploadFile). FastAPI does not bundle a multipart parser: without this it
+# raises "Form data requires python-multipart to be installed" while BUILDING the route
+# table, so the whole service fails at import time — not on first request. Verified live:
+# adding this was what let the Phase 4 vision routes start at all.
+python-multipart==0.0.20
 PyMuPDF==1.25.1
 pytesseract==0.3.13
 # Pillow and transformers are pinned to satisfy colpali-engine==0.3.5's actual

@@ -1,0 +1,12 @@
+# LOCAL VERIFICATION OVERRIDE ONLY. Layers on top of docker-compose.prod.yml via
+# `docker compose -f docker-compose.prod.yml -f docker-compose.prod.verify.yml`, swapping
+# only the Caddyfile mount (real ACME → `tls internal`, see Caddyfile.verify) so the real
+# shipped docker-compose.prod.yml and Caddyfile stay untouched by this pass. Not referenced
+# by any documented deploy command — a real deployment never passes this file.
+services:
+  caddy:
+    volumes:
+      - ./Caddyfile.verify:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config

@@ -1,0 +1,42 @@
+# Production reverse proxy (phase 6 §8.2, task 6.19-6.20). Caddy provisions its own TLS
+# certificate for {$DOMAIN} automatically (ACME/Let's Encrypt) — no manual cert management.
+#
+# Serves the static frontend bundle from /srv/frontend, which docker-compose.prod.yml
+# bind-mounts from ./frontend/dist — run `cd frontend && npm run build` before `docker
+# compose -f docker-compose.prod.yml up`; this Caddyfile does not build it itself.
+{$DOMAIN} {
+    encode gzip
+
+    # Every backend route is defined WITH its literal /api/ prefix baked in
+    # (backend/src/api/routes/*.js — e.g. `router.post('/api/ask', ...)`, not `/ask`
+    # mounted under an /api prefix elsewhere), so the prefix must reach the backend
+    # intact. Verified live: an earlier version of this file used `handle_path /api/*`,
+    # which *strips* the matched prefix before proxying — every single API route 404'd
+    # ("Cannot POST /ask" for a request to /api/ask) the moment Caddy was actually in the
+    # path, invisible in local dev where nothing proxies between the browser and the
+    # backend at all. Plain `handle` does not strip.
+    #
+    # flush_interval -1 applies to this whole block, not a separate SSE-only matcher —
+    # this is deliberate, not a simplification that lost precision. A second, more
+    # specific `handle`/`handle_path` block scoped to just /api/ask (to give only the SSE
+    # route unbuffered flushing) hits Caddy's automatic directive-sorting: mixing
+    # `handle_path` and a matcher-scoped `reverse_proxy`/`handle` at the same block level
+    # reorders them by directive name, not by declaration order or path specificity —
+    # verified live, repeatedly, across several restructurings, until collapsing to this
+    # single block sidestepped the ambiguity entirely. The tradeoff is real but small:
+    # every /api/* response — not just the streamed one — now flushes on every write
+    # instead of Caddy's small default buffering window. An ordinary JSON response is
+    # written by Express in one shot regardless, so this is unmeasurable for anything
+    # except /api/ask, which is exactly the route that needed it.
+    handle /api/* {
+        reverse_proxy backend:5000 {
+            flush_interval -1
+        }
+    }
+
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

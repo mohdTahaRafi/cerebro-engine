@@ -1,0 +1,12 @@
+node_modules
+build
+storage
+uploads
+*.log
+.env
+.env.*
+!.env.example
+test
+bench/results
+bench/.tmp
+.git

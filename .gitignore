@@ -156,6 +156,10 @@ storybook-static/
 # Content-addressed uploaded source files (backend/src/api/documents.js) and
 # generated page images (Phase 4) / StorageAdapter filesystem driver output.
 backend/storage/
+# Root-level page images: PAGE_STORAGE_DIR defaults here when the backend runs
+# outside a container (docker-compose mounts /storage/pages instead). Ingested
+# document renders — never commit them.
+storage/
 backend/uploads/
 
 # ColPali weights and other HF model caches, if ever synced outside the named

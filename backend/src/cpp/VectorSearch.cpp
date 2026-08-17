@@ -4,6 +4,7 @@
 #include <queue>
 #include <vector>
 #include <algorithm>
+#include <string>
 
 namespace Cerebro {
 
@@ -17,9 +18,6 @@ struct CompareResults {
         return a.score > b.score;
     }
 };
-
-void VectorSearchImpl::AddDocumentVectors(const float* vectorData, size_t totalVectors, size_t dimensions) {
-}
 
 Napi::Object CerebroEngine::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "CerebroEngine", {
@@ -71,6 +69,11 @@ Napi::Value CerebroEngine::ReceiveVectors(const Napi::CallbackInfo& info) {
     return result;
 }
 
+// Brute-force scan over whatever dataset buffer the caller passes in. There is no
+// server-side index retained between calls — the caller rebuilds `dataset` fresh on every
+// invocation and hands the whole thing in here each time. This addon has not been on the
+// query serving path since Phase 3 (Qdrant took over hybrid retrieval); it survives now as
+// the benchmark artifact bench/cppVsQdrant.js measures (phase 6 §3, §5.2).
 Napi::Value CerebroEngine::SearchVectors(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
@@ -83,16 +86,32 @@ Napi::Value CerebroEngine::SearchVectors(const Napi::CallbackInfo& info) {
     Napi::Float32Array datasetArr = info[1].As<Napi::Float32Array>();
     int k = info[2].As<Napi::Number>().Int32Value();
 
+    // Dimension is derived from the query vector itself rather than hardcoded, then the
+    // dataset buffer is strictly validated against it. A malformed/truncated dataset
+    // (length not an exact multiple of dim) previously fell through silent integer
+    // division and corrupted results — it now throws instead.
+    size_t dim = queryArr.ElementLength();
+    if (dim == 0) {
+        Napi::RangeError::New(env, "Query vector must not be empty").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    if (datasetArr.ElementLength() % dim != 0) {
+        Napi::RangeError::New(env,
+            "Dataset buffer length (" + std::to_string(datasetArr.ElementLength()) +
+            ") is not an exact multiple of the query vector's dimension (" + std::to_string(dim) + ")")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     const float* queryPtr = queryArr.Data();
     const float* datasetPtr = datasetArr.Data();
 
-    size_t dim = 384;
     size_t numVectors = datasetArr.ElementLength() / dim;
 
     std::priority_queue<SearchResult, std::vector<SearchResult>, CompareResults> minHeap;
 
     for (size_t i = 0; i < numVectors; i++) {
-        float score = SimdDotProduct(queryPtr, datasetPtr + (i * dim));
+        float score = SimdDotProduct(queryPtr, datasetPtr + (i * dim), dim);
         minHeap.push({(int)i, score});
         if ((int)minHeap.size() > k) {
             minHeap.pop();

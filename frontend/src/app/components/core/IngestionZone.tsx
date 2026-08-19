@@ -1,10 +1,14 @@
 import { useState, useCallback, useRef } from 'react';
 import { Upload, CheckCircle, AlertTriangle, FileText } from 'lucide-react';
+import { api } from '../../../api';
 
-// Mirrors POST /api/documents + GET /api/documents/:id/status's real lifecycle (phase 6
-// §5.1: the legacy /api/ingest this used to hit no longer exists). 'idle' is the only
-// state with no in-flight document; everything else tracks a real Document row's status
-// field one-to-one, so this label is never a fabricated stage the backend never reports.
+// Mirrors POST /api/documents + GET /api/documents/:id/status's real lifecycle, now
+// routed through src/api/ (phase_1 §8) — api.documents.upload() + pollUntilSettled(),
+// which is also what consolidates this poll loop with the one that used to live
+// separately in EngineContext. No behavior change: same 1500ms interval, same 5-minute
+// timeout. 'idle' is the only state with no in-flight document; everything else tracks a
+// real Document row's status field one-to-one, so this label is never a fabricated stage
+// the backend never reports.
 type IngestionStage = 'idle' | 'queued' | 'processing' | 'ready' | 'failed';
 
 interface IngestionResult {
@@ -22,9 +26,6 @@ const STAGE_LABELS: Record<IngestionStage, string> = {
   failed: 'INGESTION FAILED',
 };
 
-const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 5 * 60_000;
-
 export function IngestionZone() {
   const [stage, setStage] = useState<IngestionStage>('idle');
   const [progress, setProgress] = useState(0);
@@ -40,12 +41,7 @@ export function IngestionZone() {
     setStage('queued');
 
     try {
-      const formData = new FormData();
-      formData.append('document', file);
-
-      const response = await fetch('/api/documents', { method: 'POST', body: formData });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Upload failed');
+      const data = await api.documents.upload(file);
 
       if (data.status === 'duplicate') {
         setResult({ fileName: data.fileName, chunkCount: 0, pageCount: 0, duplicate: true });
@@ -53,35 +49,25 @@ export function IngestionZone() {
         return;
       }
 
-      const deadline = Date.now() + POLL_TIMEOUT_MS;
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        if (Date.now() > deadline) throw new Error('Ingestion is taking longer than expected.');
-        const statusRes = await fetch(`/api/documents/${data.documentId}/status`);
-        const statusData = await statusRes.json();
+      const final = await api.documents.pollUntilSettled(data.documentId, (statusData) => {
         setProgress(statusData.progress ?? 0);
-        setStage(statusData.status === 'queued' || statusData.status === 'processing' ? statusData.status : stage);
+        if (statusData.status === 'queued' || statusData.status === 'processing') {
+          setStage(statusData.status);
+        }
+      });
 
-        if (statusData.status === 'ready') {
-          setResult({
-            fileName: data.fileName, chunkCount: statusData.chunkCount,
-            pageCount: statusData.pageCount, duplicate: false,
-          });
-          setStage('ready');
-          return;
-        }
-        if (statusData.status === 'failed') {
-          throw new Error(statusData.error || 'Ingestion failed');
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      if (final.status === 'failed') {
+        throw new Error(final.error || 'Ingestion failed');
       }
-    } catch (err: any) {
-      setErrorMsg(err.message);
+      setResult({
+        fileName: data.fileName, chunkCount: final.chunkCount,
+        pageCount: final.pageCount, duplicate: false,
+      });
+      setStage('ready');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Upload failed');
       setStage('failed');
     }
-    // stage is read but deliberately not a dependency — this loop drives its own
-    // transitions from the polled response, not from re-running on stage changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -104,7 +90,7 @@ export function IngestionZone() {
     <div className="flex flex-col gap-3 h-full font-mono text-xs">
       {/* Header */}
       <div className="text-gray-500 uppercase font-bold tracking-widest text-[10px] flex items-center gap-2">
-        <Upload size={12} className="text-[#00FF41]" />
+        <Upload size={12} className="text-positive" />
         Document Ingestion
       </div>
 
@@ -116,10 +102,10 @@ export function IngestionZone() {
         onDrop={onDrop}
         className={`
           relative flex-1 min-h-[180px] border-2 border-dashed flex flex-col items-center justify-center gap-4 cursor-pointer transition-all duration-300
-          ${isDragging ? 'border-[#00FF41] bg-[#00FF41]/5 shadow-[inset_0_0_20px_rgba(0,255,65,0.1)]' : ''}
-          ${isComplete ? 'border-[#00FF41]/50 bg-[#00FF41]/5' : ''}
-          ${isError ? 'border-[#FF003C]/50 bg-[#FF003C]/5' : ''}
-          ${!isDragging && !isComplete && !isError ? 'border-[#333] hover:border-[#555] hover:bg-[#111]' : ''}
+          ${isDragging ? 'border-positive bg-positive/5 shadow-[inset_0_0_20px_rgba(0,255,65,0.1)]' : ''}
+          ${isComplete ? 'border-positive/50 bg-positive/5' : ''}
+          ${isError ? 'border-critical/50 bg-critical/5' : ''}
+          ${!isDragging && !isComplete && !isError ? 'border-line hover:border-line-strong hover:bg-surface-sunken' : ''}
         `}
       >
         <input
@@ -132,18 +118,18 @@ export function IngestionZone() {
 
         {/* Icon */}
         {isComplete ? (
-          <CheckCircle size={32} className="text-[#00FF41]" />
+          <CheckCircle size={32} className="text-positive" />
         ) : isError ? (
-          <AlertTriangle size={32} className="text-[#FF003C]" />
+          <AlertTriangle size={32} className="text-critical" />
         ) : (
-          <FileText size={32} className={`${isActive ? 'text-[#00FF41] animate-pulse' : 'text-gray-600'}`} />
+          <FileText size={32} className={`${isActive ? 'text-positive animate-pulse' : 'text-gray-600'}`} />
         )}
 
         {/* Stage label */}
         <span className={`uppercase font-bold tracking-widest text-[10px] text-center px-2 ${
-          isComplete ? 'text-[#00FF41]' :
-          isError ? 'text-[#FF003C]' :
-          isActive ? 'text-[#00FF41] animate-pulse' : 'text-gray-500'
+          isComplete ? 'text-positive' :
+          isError ? 'text-critical' :
+          isActive ? 'text-positive animate-pulse' : 'text-gray-500'
         }`}>
           {STAGE_LABELS[stage]}
         </span>
@@ -151,15 +137,15 @@ export function IngestionZone() {
         {/* Real progress bar — driven by the Document row's own `progress` field
             (ingestion/ingestDocument.js's band boundaries), not a fake timeout sequence. */}
         {isActive && (
-          <div className="w-3/4 h-1 bg-[#111] border border-[#333]">
-            <div className="h-full bg-[#00FF41] transition-all duration-300" style={{ width: `${progress}%` }} />
+          <div className="w-3/4 h-1 bg-surface-sunken border border-line">
+            <div className="h-full bg-positive transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
         )}
       </div>
 
       {/* Result Summary */}
       {result && (
-        <div className="border border-[#333] bg-black p-3 flex flex-col gap-1.5">
+        <div className="border border-line bg-surface-sunken p-3 flex flex-col gap-1.5">
           <div className="text-gray-500 uppercase font-bold tracking-widest text-[10px] mb-1">Ingestion Summary</div>
           <div className="flex justify-between">
             <span className="text-gray-400">Source</span>
@@ -173,12 +159,12 @@ export function IngestionZone() {
             <>
               <div className="flex justify-between">
                 <span className="text-gray-400">Chunks Created</span>
-                <span className="text-[#00FF41] font-bold">{result.chunkCount}</span>
+                <span className="text-positive font-bold">{result.chunkCount}</span>
               </div>
               {result.pageCount > 0 && (
                 <div className="flex justify-between">
                   <span className="text-gray-400">Pages</span>
-                  <span className="text-[#00FF41] font-bold">{result.pageCount}</span>
+                  <span className="text-positive font-bold">{result.pageCount}</span>
                 </div>
               )}
             </>
@@ -187,7 +173,7 @@ export function IngestionZone() {
       )}
 
       {errorMsg && (
-        <div className="border border-[#FF003C]/50 bg-[#FF003C]/10 p-2 text-[#FF003C] text-[10px] font-bold uppercase tracking-widest">
+        <div className="border border-critical/50 bg-critical/10 p-2 text-critical text-[10px] font-bold uppercase tracking-widest">
           {errorMsg}
         </div>
       )}
@@ -196,7 +182,7 @@ export function IngestionZone() {
       {(isComplete || isError) && (
         <button
           onClick={() => { setStage('idle'); setResult(null); setErrorMsg(null); setProgress(0); }}
-          className="border border-[#333] bg-black text-gray-500 uppercase font-bold tracking-widest text-[10px] py-2 hover:border-[#00FF41] hover:text-[#00FF41] transition-all"
+          className="border border-line bg-surface-sunken text-gray-500 uppercase font-bold tracking-widest text-[10px] py-2 hover:border-positive hover:text-positive transition-all"
         >
           INGEST ANOTHER FILE
         </button>

@@ -1,5 +1,4 @@
-import React from 'react';
-import { Target, Search, FileText, Database, ShieldAlert, Cpu } from 'lucide-react';
+import { Target, Search, FileText, Database } from 'lucide-react';
 
 export interface ResultCardProps {
   score: number;

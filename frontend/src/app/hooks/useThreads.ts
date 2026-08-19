@@ -1,37 +1,11 @@
 import { useCallback, useState } from 'react';
+import { api } from '../../api';
+import type { ThreadMessage, ThreadSummary } from '../../api/endpoints/threads';
 
-export interface ThreadSummary {
-  _id: string;
-  title: string;
-  lastMessageAt: string;
-  messageCount: number;
-}
+export type { ThreadSummary, ThreadSource, ThreadMessage } from '../../api/endpoints/threads';
 
-export interface ThreadSource {
-  kind: 'chunk' | 'page';
-  pointId: string;
-  documentId: string;
-  page: number | null;
-  score: number;
-  available: boolean;        // false when the cited document was later deleted (phase 5 §10.2)
-  fileName: string | null;   // resolved from today's Document, not stored on the message itself
-  imageUri: string | null;   // reconstructed for a page citation whose document is still live
-}
-
-export interface ThreadMessage {
-  _id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  condensedQuery: string | null;
-  sources: ThreadSource[];
-  createdAt: string;
-}
-
-// GET/PATCH/DELETE /api/threads (phase 5 §10.1, §11 point "A useThreads.ts hook and a
-// thread sidebar are added for FR-CONV-04"). Deliberately owns no polling/caching layer
-// beyond plain state — the sidebar's list is small and refetched on the actions that
-// change it (send, rename, delete), matching how useCerebroChat already treats its own
-// state in this codebase.
+// GET/PATCH/DELETE /api/threads, now routed through src/api/ (phase_1 §8 — no behavior
+// change; this hook still owns no polling/caching layer beyond plain state).
 export function useThreads() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -41,40 +15,27 @@ export function useThreads() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/threads');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to load threads');
-      setThreads(data.threads);
-    } catch (err: any) {
-      setError(err.message);
+      const { threads: list } = await api.threads.list();
+      setThreads(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load threads');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   const fetchThread = useCallback(async (id: string): Promise<{ thread: ThreadSummary; messages: ThreadMessage[] }> => {
-    const res = await fetch(`/api/threads/${id}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to load thread');
-    const { messages, ...thread } = data;
+    const { messages, ...thread } = await api.threads.get(id);
     return { thread, messages };
   }, []);
 
   const renameThread = useCallback(async (id: string, title: string) => {
-    const res = await fetch(`/api/threads/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to rename thread');
-    setThreads((prev) => prev.map((t) => (t._id === id ? { ...t, title: data.title } : t)));
+    const { title: newTitle } = await api.threads.rename(id, title);
+    setThreads((prev) => prev.map((t) => (t._id === id ? { ...t, title: newTitle } : t)));
   }, []);
 
   const deleteThread = useCallback(async (id: string) => {
-    const res = await fetch(`/api/threads/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to delete thread');
+    await api.threads.delete(id);
     setThreads((prev) => prev.filter((t) => t._id !== id));
   }, []);
 

@@ -1,15 +1,14 @@
-import React from 'react';
 import { Code2 } from 'lucide-react';
 
 export function FormulaHUD() {
   return (
-    <div className="h-24 border-t border-[#333] bg-[#020617] p-4 shrink-0">
+    <div className="h-24 border-t border-line bg-surface p-4 shrink-0">
       <div className="flex items-start gap-4 h-full">
         {/* Formula Section */}
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            <Code2 size={14} className="text-[#00FF41]" />
-            <span className="font-mono text-xs text-[#00FF41] uppercase tracking-wider">
+            <Code2 size={14} className="text-positive" />
+            <span className="font-mono text-xs text-positive uppercase tracking-wider">
               C++ CORE FORMULA
             </span>
           </div>
@@ -17,7 +16,7 @@ export function FormulaHUD() {
           <div className="font-mono text-xs text-gray-300 space-y-1">
             <div className="flex items-center gap-2">
               <span className="text-gray-500">SIMILARITY:</span>
-              <code className="text-white bg-[#111827] px-2 py-0.5 border border-[#333]">
+              <code className="text-white bg-surface-raised px-2 py-0.5 border border-line">
                 cos(θ) = (A·B) / (||A|| * ||B||)
               </code>
             </div>
@@ -28,11 +27,11 @@ export function FormulaHUD() {
         </div>
 
         {/* Real-time computation stats */}
-        <div className="w-64 border-l border-[#333] pl-4">
+        <div className="w-64 border-l border-line pl-4">
           <div className="font-mono text-[10px] space-y-1.5">
             <div className="flex justify-between">
               <span className="text-gray-500">DOT PRODUCT OPS</span>
-              <span className="text-[#00FF41]">147,456/sec</span>
+              <span className="text-positive">147,456/sec</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">SIMD LANES</span>
@@ -44,7 +43,7 @@ export function FormulaHUD() {
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">CACHE HITS</span>
-              <span className="text-[#00FF41]">98.7%</span>
+              <span className="text-positive">98.7%</span>
             </div>
           </div>
         </div>

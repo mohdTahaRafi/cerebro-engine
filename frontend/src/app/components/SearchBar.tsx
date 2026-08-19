@@ -1,4 +1,3 @@
-import React from 'react';
 import { Search, Command, Sparkles } from 'lucide-react';
 
 export function SearchBar() {

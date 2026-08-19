@@ -61,11 +61,11 @@ export function ThreadSidebar({ activeThreadId, onSelectThread, onNewThread, ref
   };
 
   return (
-    <div className="w-64 shrink-0 h-full flex flex-col border-r border-[#222] bg-[#050505]">
-      <div className="p-3 border-b border-[#222]">
+    <div className="w-64 shrink-0 h-full flex flex-col border-r border-line-subtle bg-surface">
+      <div className="p-3 border-b border-line-subtle">
         <button
           onClick={onNewThread}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0F0F0F] border border-[#333] text-gray-300 hover:border-[#555] hover:text-white transition-colors text-sm"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-sunken border border-line text-gray-300 hover:border-line-strong hover:text-white transition-colors text-sm"
         >
           <MessageSquarePlus size={16} />
           New chat
@@ -90,7 +90,7 @@ export function ThreadSidebar({ activeThreadId, onSelectThread, onNewThread, ref
               key={thread._id}
               onClick={() => !isEditing && onSelectThread(thread._id)}
               className={`group mx-2 mb-1 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
-                isActive ? 'bg-[#1a1a1a] border border-[#333]' : 'border border-transparent hover:bg-[#0F0F0F]'
+                isActive ? 'bg-surface-raised border border-line' : 'border border-transparent hover:bg-surface-sunken'
               }`}
             >
               {isEditing ? (
@@ -104,7 +104,7 @@ export function ThreadSidebar({ activeThreadId, onSelectThread, onNewThread, ref
                       if (e.key === 'Enter') commitRename(thread._id);
                       if (e.key === 'Escape') setEditingId(null);
                     }}
-                    className="flex-1 bg-[#111] border border-[#444] rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-[#666]"
+                    className="flex-1 bg-surface-sunken border border-line-strong rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-line-strong"
                   />
                   <button onClick={() => commitRename(thread._id)} className="text-gray-400 hover:text-white">
                     <Check size={14} />

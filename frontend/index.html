@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cerebro</title>
+    <!-- phase_1 §3 "The flash problem" — next-themes sets the `.dark` class before
+         React's first commit, but index.html's own background still paints white
+         before the bundle loads. This blocking script runs before any stylesheet is
+         parsed (so it can't read a CSS variable) and sets both the class and an
+         inline background matching theme.css's --surface / .dark --surface. The two
+         hex values are duplicated from theme.css on purpose — see theme.css's own
+         :root/.dark blocks for the source of truth. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('cerebro-theme');
+          var dark = t === 'dark' ||
+            ((!t || t === 'system') && matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.style.background = dark ? '#0B1224' : '#FBFBFE';
+        } catch (e) { /* private mode: fall through to the CSS default */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

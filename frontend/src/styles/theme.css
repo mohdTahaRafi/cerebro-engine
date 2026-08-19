@@ -1,183 +1,247 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-size: 16px;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
-  --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --surface:            #FBFBFE;  /* app background, near-white with a hairline cool cast */
+  --surface-raised:     #FFFFFF;  /* cards, the composer, the evidence margin — pure white */
+  --surface-sunken:     #F5F7FD;  /* wells: code blocks, table headers, quote blocks */
+  --surface-overlay:    #FFFFFF;  /* dialogs, popovers, dropdowns */
+  --scrim:              rgb(8 13 28 / 0.45);   /* ink-950 based modal backdrop */
+
+  /* ── Ink ──────────────────────────────────────────────────────────────── */
+  --ink:                #080D1C;  /* ink-950 — primary text, page titles */
+  --ink-secondary:      #293858;  /* ink-700 — body copy that is not the headline */
+  --graphite:           #64779A;  /* ink-500 — labels, metadata, captions */
+  --graphite-faint:     #8B9AB8;  /* one step past ink-500 — placeholder/disabled ONLY, see §2.2 */
+
+  /* ── Lines ────────────────────────────────────────────────────────────── */
+  --line-subtle:        #EAEFF7;
+  --line:               #DFE5F2;  /* default border */
+  --line-strong:        #CBD5E5;  /* focused control, emphasized dividers */
+
+  /* ── Signal: the one accent, used for everything interactive ──────────── */
+  --signal:             #004FFE;  /* cerebro-500 — primary buttons, links, active nav, focus */
+  --signal-hover:       #0046E8;  /* cerebro-600 */
+  --signal-active:      #003CC7;  /* cerebro-700 — pressed/active state */
+  --signal-soft:        #EFF5FF;  /* cerebro-50 — selected row, active nav pill */
+  --signal-soft-line:   #DDE9FF;  /* cerebro-100 — border paired with signal-soft */
+  --signal-on:          #FFFFFF; /* text on a signal-filled surface */
+  --signal-ring:        rgb(0 79 254 / 0.10);   /* focus ring, matches `ring-cerebro-500/10` */
+
+  /* ── State (semantic ONLY — never decorative, never used to mark evidence) */
+  --positive:           #059669;  /* emerald-600 — icons, dots, large text */
+  --positive-text:      #047857;  /* emerald-700 — small text on `-soft`, see §2.2 */
+  --positive-soft:      #ECFDF5;  --positive-soft-line: #D1FAE5;
+  --warn:               #D97706;  /* amber-600 */
+  --warn-text:          #B45309;  /* amber-700 */
+  --warn-soft:          #FFFBEB;  --warn-soft-line:     #FEF3C7;
+  --critical:           #DC2626;  /* red-600 */
+  --critical-text:      #B91C1C;  /* red-700 */
+  --critical-soft:      #FEF2F2;  --critical-soft-line: #FEE2E2;
+
+  /* ── Pipeline stage identity ──────────────────────────────────────────────
+     Categorical, NOT semantic: these name a stage, they never mean good/bad.
+     Used ONLY by the ProvenanceRibbon and the Waterfall (phase_3 §6, phase_4
+     §3.2). Chosen to sit at similar saturation and lightness so no single
+     stage reads as the important one; `--stage-embed` is deliberately NOT
+     --signal, so a ribbon segment is never mistaken for an interactive
+     element. Distinguishable under the common red-green deficiencies; the
+     ribbon also carries text labels, so color is never the only channel
+     (DESIGN.md §5.7).                                                    ── */
+  --stage-condense:     #7C8AA8;   /* muted slate — the stage most often skipped */
+  --stage-embed:        #3B7DD8;
+  --stage-sparse:       #2E9E7A;
+  --stage-colpali:      #8B5CD6;
+  --stage-retrieve:     #D9822B;
+  --stage-merge:        #C2568F;
+  --stage-rerank:       #4B6FD6;
+  --stage-generate:     #1FA6A6;
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* ── Geometry — mapped onto Tailwind's own scale, not a bespoke one ────── */
+  --radius-sm:  6px;    /* chips, badges, inline code — ~rounded-md */
+  --radius:     8px;    /* buttons, inputs — rounded-lg */
+  --radius-lg:  12px;   /* cards, dialogs, panels — rounded-xl */
+  --radius-pill: 999px;
+
+  /* ── Elevation. Borders carry most separation; shadow is a light finish. ── */
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.04);                                  /* shadow-sm */
+  --shadow-2: 0 4px 20px rgb(15 23 42 / 0.04);                                 /* major panels */
+  --shadow-3: 0 4px 20px rgb(15 23 42 / 0.08), 0 1px 3px rgb(15 23 42 / 0.06); /* dialogs only */
+
+  /* ── Motion — three durations, one easing curve (§2.6) ─────────────────── */
+  --motion-fast: 120ms;   /* hover, focus, color change */
+  --motion:      200ms;   /* dropdown, accordion, tab */
+  --motion-slow: 320ms;   /* dialog, drawer, route transition */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --surface:            #0B1224;  /* ink-900 — app background */
+  --surface-raised:     #17213A;  /* ink-800 — cards sit ABOVE by getting LIGHTER, not by shadow */
+  --surface-sunken:     #080D1C;  /* ink-950 — darker than the page, wells */
+  --surface-overlay:    #17213A;
+  --scrim:              rgb(8 13 28 / 0.66);   /* ink-950 based */
+
+  --ink:                #F1F5FB;  /* near-white, cool cast to match the light-mode surface tint */
+  --ink-secondary:      #C7D0E0;
+  --graphite:           #8B9AB8;
+  --graphite-faint:     #64779A;  /* ink-500 — flips light mode's graphite/graphite-faint pair */
+
+  --line-subtle:        #17213A;
+  --line:               #17213A;
+  --line-strong:        #293858;  /* ink-700 */
+
+  --signal:             #4F82FF;  /* cerebro-400 — brighter than light mode for dark-bg contrast */
+  --signal-hover:       #8FB2FF;  /* cerebro-300 */
+  --signal-active:      #BDD2FF;  /* cerebro-200 */
+  /* Alpha, not hex — composites the accent directly over whatever --surface
+     already is, so it is correct by construction. See the note below. */
+  --signal-soft:        rgb(79 130 255 / 0.16);
+  --signal-soft-line:   rgb(79 130 255 / 0.32);
+  --signal-on:          #FFFFFF;
+  --signal-ring:        rgb(79 130 255 / 0.45);
+
+  --positive:           #34D399;  /* emerald-400 */
+  --positive-text:      #6EE7B7;  /* emerald-300 */
+  --positive-soft:      rgb(52 211 153 / 0.15);  --positive-soft-line: rgb(52 211 153 / 0.30);
+  --warn:               #FBBF24;  /* amber-400 */
+  --warn-text:          #FCD34D;  /* amber-300 */
+  --warn-soft:          rgb(251 191 36 / 0.15);  --warn-soft-line:     rgb(251 191 36 / 0.30);
+  --critical:           #F87171;  /* red-400 */
+  --critical-text:      #FCA5A5;  /* red-300 */
+  --critical-soft:      rgb(248 113 113 / 0.15); --critical-soft-line: rgb(248 113 113 / 0.30);
+
+  /* Stage hues lifted toward the light end for a dark ground — same hue order,
+     same relative spacing, so a ribbon reads identically in both themes.
+     Amended 2026-08-19: --stage-rerank's straight lift (#8AA6F0) landed only
+     ΔE 7.21 from --stage-embed — task 1.3a's own ΔE-10 script (test/
+     stageColors.test.mjs) catches this. Shifted further toward indigo,
+     which is also the direction light mode's rerank already leans relative
+     to embed (§2.1's light block), so the hue-order/spacing intent still
+     holds; the new pair clears ΔE 22. */
+  --stage-condense:     #94A3BE;
+  --stage-embed:        #6BA3F0;
+  --stage-sparse:       #5CC8A0;
+  --stage-colpali:      #B18CEC;
+  --stage-retrieve:     #F0A65C;
+  --stage-merge:        #E086B4;
+  --stage-rerank:       #6C63D6;
+  --stage-generate:     #4FC9C9;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.40);
+  --shadow-2: 0 4px 20px rgb(0 0 0 / 0.35);
+  --shadow-3: 0 16px 40px rgb(0 0 0 / 0.60);
 }
 
+/* Why dark mode's `-soft` tokens are alpha, not hex: copying the light hex
+   value (or lightening it) produces a selected-row background that is 90%
+   white on a near-black page. rgb(<hue> / <alpha>) composites over whatever
+   --surface already is, so there is no hex to get wrong. Applies to every
+   `-soft` token in `.dark` (signal, positive, warn, critical). */
+
 @theme inline {
-  --font-sans: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-input-background: var(--input-background);
-  --color-switch-background: var(--switch-background);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface:            var(--surface);
+  --color-surface-raised:     var(--surface-raised);
+  --color-surface-sunken:     var(--surface-sunken);
+  --color-surface-overlay:    var(--surface-overlay);
+  --color-ink:                var(--ink);
+  --color-ink-secondary:      var(--ink-secondary);
+  --color-graphite:           var(--graphite);
+  --color-graphite-faint:     var(--graphite-faint);
+  --color-line-subtle:        var(--line-subtle);
+  --color-line:               var(--line);
+  --color-line-strong:        var(--line-strong);
+  --color-signal:             var(--signal);
+  --color-signal-hover:       var(--signal-hover);
+  --color-signal-active:      var(--signal-active);
+  --color-signal-soft:        var(--signal-soft);
+  --color-signal-soft-line:   var(--signal-soft-line);
+  --color-signal-on:          var(--signal-on);
+  --color-positive:           var(--positive);
+  --color-positive-text:      var(--positive-text);
+  --color-positive-soft:      var(--positive-soft);
+  --color-positive-soft-line: var(--positive-soft-line);
+  --color-warn:               var(--warn);
+  --color-warn-text:          var(--warn-text);
+  --color-warn-soft:          var(--warn-soft);
+  --color-warn-soft-line:     var(--warn-soft-line);
+  --color-critical:           var(--critical);
+  --color-critical-text:      var(--critical-text);
+  --color-critical-soft:      var(--critical-soft);
+  --color-critical-soft-line: var(--critical-soft-line);
+  --color-stage-condense:     var(--stage-condense);
+  --color-stage-embed:        var(--stage-embed);
+  --color-stage-sparse:       var(--stage-sparse);
+  --color-stage-colpali:      var(--stage-colpali);
+  --color-stage-retrieve:     var(--stage-retrieve);
+  --color-stage-merge:        var(--stage-merge);
+  --color-stage-rerank:       var(--stage-rerank);
+  --color-stage-generate:     var(--stage-generate);
+  --font-sans:                var(--font-sans);
+  --radius-sm:                var(--radius-sm);
+  --radius:                   var(--radius);
+  --radius-lg:                var(--radius-lg);
+
+  /* ── Legacy shadcn bridge ────────────────────────────────────────────────
+     phase_1 §8: "every component in app/components/ui/ (the 40 Radix
+     wrappers) is re-pointed from the old shadcn variable names onto the v2
+     token names." The 40 wrappers still SPELL their classes bg-primary,
+     text-muted-foreground, border-input, etc. — renaming every class in
+     every wrapper is Phase 2+'s cleanup pass — but every one of those names
+     must resolve to a real v2 token today, or the component renders with an
+     undefined color the moment this file stops defining --primary/
+     --background/etc (which the retired placeholder theme did). This block
+     is that resolution: it is a value bridge, not a second palette — no new
+     hex appears here, everything points at a token already defined above. */
+  --color-background:            var(--surface);
+  --color-foreground:            var(--ink);
+  --color-card:                  var(--surface-raised);
+  --color-card-foreground:       var(--ink);
+  --color-popover:               var(--surface-overlay);
+  --color-popover-foreground:    var(--ink);
+  --color-primary:               var(--signal);
+  --color-primary-foreground:    var(--signal-on);
+  --color-secondary:             var(--surface-sunken);
+  --color-secondary-foreground:  var(--ink);
+  --color-muted:                 var(--surface-sunken);
+  --color-muted-foreground:      var(--graphite);
+  --color-accent:                var(--surface-sunken);
+  --color-accent-foreground:     var(--ink);
+  --color-destructive:           var(--critical);
+  --color-destructive-foreground: var(--signal-on);
+  --color-border:                var(--line);
+  --color-input:                 var(--line);
+  --color-input-background:      var(--surface-sunken);
+  --color-switch-background:     var(--line-strong);
+  --color-ring:                  var(--signal);
+  --color-sidebar:                        var(--surface-raised);
+  --color-sidebar-foreground:             var(--ink);
+  --color-sidebar-primary:                var(--signal);
+  --color-sidebar-primary-foreground:     var(--signal-on);
+  --color-sidebar-accent:                 var(--surface-sunken);
+  --color-sidebar-accent-foreground:      var(--ink);
+  --color-sidebar-border:                 var(--line);
+  --color-sidebar-ring:                   var(--signal);
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-
   body {
-    @apply bg-background text-foreground;
+    @apply bg-surface text-ink;
+    font-family: var(--font-sans);
   }
+}
 
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
-
-  html {
-    font-size: var(--font-size);
-  }
-
-  h1 {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h2 {
-    font-size: var(--text-xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h3 {
-    font-size: var(--text-lg);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h4 {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  label {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  button {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  input {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-normal);
-    line-height: 1.5;
+/* §2.6 — reduced motion: suppress everything except the streaming caret,
+   which is implemented as an opacity step (not an animation) so it survives
+   this override without vanishing — see AnswerBox's caret span. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

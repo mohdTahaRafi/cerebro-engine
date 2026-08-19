@@ -13,7 +13,7 @@ interface ChatInputProps {
 export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { attachedFiles, setAttachedFiles, attachedSources, setAttachedSources, ingestFile } = useEngine();
+  const { attachedFiles, setAttachedFiles, setAttachedSources, ingestFile } = useEngine();
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -81,7 +81,7 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
       ref={formRef}
       onSubmit={handleSubmit}
       layoutId="chat-input-form"
-      className="relative flex flex-col w-full shadow-[0_0_30px_rgba(0,0,0,0.5)] rounded-2xl bg-[#0F0F0F] border border-[#333] transition-all focus-within:border-[#555] focus-within:shadow-[0_0_40px_rgba(255,255,255,0.05)] p-3 pb-2"
+      className="relative flex w-full flex-col rounded-2xl border border-line bg-surface-raised p-3 pb-2 shadow-2 transition-colors focus-within:border-line-strong"
     >
       <input 
         type="file" 
@@ -95,15 +95,15 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
       {attachedFiles.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2 px-2">
           {attachedFiles.map((file, i) => (
-            <div key={i} className="flex items-center gap-2 bg-[#222] border border-[#444] rounded-xl px-3 py-1.5">
-              <span className="text-xs font-mono text-gray-300 truncate max-w-[150px]">{file.name}</span>
+            <div key={i} className="flex items-center gap-2 rounded-xl border border-line bg-surface-sunken px-3 py-1.5">
+              <span className="max-w-[150px] truncate text-xs text-ink-secondary">{file.name}</span>
               <button
                 type="button"
                 onClick={() => {
                   setAttachedFiles(prev => prev.filter((_, idx) => idx !== i));
                   setAttachedSources(prev => prev.filter((_, idx) => idx !== i));
                 }}
-                className="text-gray-500 hover:text-white transition-colors"
+                className="text-graphite transition-colors hover:text-ink"
                 title="Remove attachment"
               >
                 <X size={14} />
@@ -118,7 +118,7 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl text-gray-400 hover:text-white hover:bg-[#222] transition-colors mb-1"
+          className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl text-graphite hover:text-ink hover:bg-surface-sunken transition-colors mb-1"
           title="Attach Document"
         >
           <Paperclip size={20} />
@@ -127,7 +127,7 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
         <TextareaAutosize
           name="query"
           placeholder="Ask Cerebro anything..."
-          className="flex-1 bg-transparent text-gray-200 placeholder-gray-500 text-lg py-2 resize-none focus:outline-none custom-scrollbar leading-relaxed"
+          className="flex-1 bg-transparent text-ink placeholder-graphite text-base py-2 resize-none focus:outline-none custom-scrollbar leading-relaxed"
           minRows={1}
           maxRows={6}
           onKeyDown={handleKeyDown}
@@ -137,7 +137,7 @@ export function ChatInput({ onSearch, isSearching }: ChatInputProps) {
         <button
           type="submit"
           disabled={isSearching}
-          className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl bg-white text-black hover:bg-gray-200 disabled:opacity-30 disabled:bg-gray-700 disabled:text-gray-400 transition-colors mb-1"
+          className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl bg-signal text-signal-on hover:bg-signal-hover disabled:opacity-40 transition-colors mb-1"
         >
           <ArrowUp size={20} strokeWidth={3} />
         </button>

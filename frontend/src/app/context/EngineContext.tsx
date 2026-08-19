@@ -1,51 +1,10 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { useCerebroChat, type ChatSource, type ChatTelemetry } from '../hooks/useCerebroChat';
 import type { LangSmithLink } from '../components/core/TelemetryTypes';
+import { api } from '../../api';
+import type { DocumentStatusResponse, IngestionResponse } from '../../api/endpoints/documents';
 
-// Matches POST /api/documents' response (backend/src/api/routes/documents.js) — replaces
-// the legacy /api/ingest contract (chunksCount/processingTimeS/source) that route no
-// longer exists to serve (phase 6 §5.1, §5.3: /api/ingest and IngestionService.js were
-// deleted this phase). Ingestion here is async: this is the *enqueue* response, not a
-// finished result — see DocumentStatus / pollDocumentStatus below for what happens after.
-export interface IngestionResponse {
-  documentId: string;
-  status: 'queued' | 'duplicate';
-  fileName: string;
-  duplicateOf?: string;
-  message?: string;
-}
-
-// Matches GET /api/documents/:id/status.
-export interface DocumentStatus {
-  status: 'queued' | 'processing' | 'ready' | 'failed' | 'duplicate';
-  progress: number;
-  error: string | null;
-  chunkCount: number;
-  pageCount: number;
-}
-
-const POLL_INTERVAL_MS = 1500;
-// Bounds how long a caller waits for ingestion to finish before giving up on the promise
-// (the job itself keeps running server-side either way — BullMQ owns that lifecycle, not
-// this poll loop). Generous relative to architecture's own budgets (30s text, ~6s/page
-// visual) to comfortably cover a multi-page scanned document without the UI declaring
-// failure on something that is still legitimately in progress.
-const POLL_TIMEOUT_MS = 5 * 60_000;
-
-async function pollDocumentStatus(
-  documentId: string,
-  onProgress?: (s: DocumentStatus) => void,
-): Promise<DocumentStatus> {
-  const deadline = Date.now() + POLL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const res = await fetch(`/api/documents/${documentId}/status`);
-    const data: DocumentStatus = await res.json();
-    onProgress?.(data);
-    if (data.status === 'ready' || data.status === 'failed') return data;
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-  }
-  throw new Error('Ingestion is taking longer than expected; check the document list for its status.');
-}
+export type { IngestionResponse, DocumentStatusResponse as DocumentStatus } from '../../api/endpoints/documents';
 
 interface EngineState {
   // Chat state (the conversational RAG pipeline — phase 5/6)
@@ -69,16 +28,14 @@ interface EngineState {
   // Document ids (Mongo _id from POST /api/documents) for attachments that have finished
   // ingesting and are ready to be searched — populated once ingestFile's returned promise
   // resolves, not at attach time. Passed to askCerebro as scopeDocumentIds so a question
-  // asked right after an attachment is actually scoped to it (phase 6 closes the gap phase
-  // 5 left open: "attachments no longer scope retrieval... a Phase 2/3 frontend gap this
-  // phase does not touch").
+  // asked right after an attachment is actually scoped to it.
   attachedSources: string[];
   setAttachedSources: React.Dispatch<React.SetStateAction<string[]>>;
   // Enqueues the upload, then polls until the document reaches 'ready' (or throws on
   // 'failed'/timeout) — the returned promise settles once the document is actually
   // searchable, not merely accepted. Callers (ChatInput's attach flow) hold a loading
   // toast open for exactly that whole span, which is the honest UX for an async pipeline.
-  ingestFile: (file: File, onProgress?: (s: DocumentStatus) => void) => Promise<IngestionResponse & { chunkCount: number; pageCount: number }>;
+  ingestFile: (file: File, onProgress?: (s: DocumentStatusResponse) => void) => Promise<IngestionResponse & { chunkCount: number; pageCount: number }>;
 }
 
 const EngineContext = createContext<EngineState | undefined>(undefined);
@@ -91,19 +48,20 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachedSources, setAttachedSources] = useState<string[]>([]);
 
+  // phase_1 §8 — routed through src/api/ (api.documents.upload + pollUntilSettled),
+  // which is also what consolidates this poll loop with the one that used to live
+  // separately in IngestionZone. No behavior change: same 1500ms interval, same
+  // 5-minute timeout.
   const ingestFile: EngineState['ingestFile'] = async (file, onProgress) => {
-    const formData = new FormData();
-    formData.append('document', file);
-
     // Optimistically add to UI — removed again below if the enqueue call itself fails.
     setAttachedFiles((prev) => [...prev, file]);
 
-    const res = await fetch('/api/documents', { method: 'POST', body: formData });
-    const data: IngestionResponse = await res.json();
-
-    if (!res.ok) {
+    let data: IngestionResponse;
+    try {
+      data = await api.documents.upload(file);
+    } catch (err) {
       setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name));
-      throw new Error((data as any)?.error || 'Upload failed');
+      throw new Error(err instanceof Error ? err.message : 'Upload failed');
     }
 
     // A duplicate resolves immediately against the existing (already-ready) document —
@@ -114,7 +72,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       return { ...data, chunkCount: 0, pageCount: 0 };
     }
 
-    const final = await pollDocumentStatus(data.documentId, onProgress);
+    let final: DocumentStatusResponse;
+    try {
+      final = await api.documents.pollUntilSettled(data.documentId, onProgress);
+    } catch (err) {
+      setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name));
+      throw err;
+    }
     if (final.status === 'failed') {
       setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name));
       throw new Error(final.error || 'Ingestion failed');

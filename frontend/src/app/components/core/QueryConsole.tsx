@@ -39,15 +39,15 @@ export function QueryConsole({ onSearch, onStop, isSearching }: QueryConsoleProp
   };
 
   return (
-    <div className="w-[340px] flex-shrink-0 border-r border-[#333] bg-[#0A0A0A] flex flex-col font-mono text-xs text-gray-300">
-      <div className="h-10 border-b border-[#333] flex items-center justify-between px-4 uppercase font-bold text-gray-500 tracking-wider bg-[#0F0F0F] shrink-0">
-        <span className="flex items-center gap-2"><Code size={14} className="text-[#00FF41]" /> Query Console</span>
+    <div className="w-[340px] flex-shrink-0 border-r border-line bg-surface-sunken flex flex-col font-mono text-xs text-gray-300">
+      <div className="h-10 border-b border-line flex items-center justify-between px-4 uppercase font-bold text-gray-500 tracking-wider bg-surface-sunken shrink-0">
+        <span className="flex items-center gap-2"><Code size={14} className="text-positive" /> Query Console</span>
         <button
           onClick={isSearching ? onStop : handleSearch}
           disabled={!isSearching && !canRun}
           title={isSearching ? 'Stop generating' : 'Run query (Ctrl+Enter)'}
           className={`transition-colors ${
-            isSearching ? 'text-[#FF003C] hover:text-white' : canRun ? 'hover:text-[#00FF41]' : 'text-gray-700 cursor-not-allowed'
+            isSearching ? 'text-critical hover:text-white' : canRun ? 'hover:text-positive' : 'text-gray-700 cursor-not-allowed'
           }`}
         >
           {isSearching ? <Square size={14} fill="currentColor" /> : <Play size={14} />}
@@ -59,9 +59,9 @@ export function QueryConsole({ onSearch, onStop, isSearching }: QueryConsoleProp
           <label className="text-gray-500 uppercase font-bold tracking-widest text-[10px]">
             Question (natural language)
           </label>
-          <div className="border border-[#333] bg-black shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+          <div className="border border-line bg-black shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
             <textarea
-              className="w-full bg-transparent p-3 outline-none text-[#00FF41] resize-none h-48 font-mono leading-relaxed selection:bg-[#00FF41]/30 custom-scrollbar disabled:opacity-50"
+              className="w-full bg-transparent p-3 outline-none text-positive resize-none h-48 font-mono leading-relaxed selection:bg-positive/30 custom-scrollbar disabled:opacity-50"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -72,12 +72,12 @@ export function QueryConsole({ onSearch, onStop, isSearching }: QueryConsoleProp
           </div>
           <div className="flex justify-between text-[10px]">
             <span className="text-gray-600 uppercase tracking-widest">Ctrl+Enter to run</span>
-            <span className={tooLong ? 'text-[#FF003C] font-bold' : 'text-gray-600'}>
+            <span className={tooLong ? 'text-critical font-bold' : 'text-gray-600'}>
               {query.length} / {MAX_QUERY_CHARS}
             </span>
           </div>
           {tooLong && (
-            <div className="text-[#FF003C] text-[10px] font-bold uppercase tracking-wide">
+            <div className="text-critical text-[10px] font-bold uppercase tracking-wide">
               Query exceeds {MAX_QUERY_CHARS} characters — the backend will reject this.
             </div>
           )}
@@ -89,9 +89,9 @@ export function QueryConsole({ onSearch, onStop, isSearching }: QueryConsoleProp
             disabled={!isSearching && !canRun}
             className={`w-full py-2 border font-bold uppercase tracking-[0.2em] transition-all duration-300 ${
               isSearching
-                ? 'bg-[#FF003C]/10 border-[#FF003C]/40 text-[#FF003C] hover:bg-[#FF003C] hover:text-white'
+                ? 'bg-critical/10 border-critical/40 text-critical hover:bg-critical hover:text-white'
                 : canRun
-                  ? 'bg-[#00FF41]/10 border-[#00FF41]/30 text-[#00FF41] hover:bg-[#00FF41] hover:text-black shadow-[0_0_15px_rgba(0,255,65,0.1)]'
+                  ? 'bg-positive/10 border-positive/30 text-positive hover:bg-positive hover:text-black shadow-[0_0_15px_rgba(0,255,65,0.1)]'
                   : 'bg-gray-900 border-gray-800 text-gray-600 cursor-not-allowed'
             }`}
           >

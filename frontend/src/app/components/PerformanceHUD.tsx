@@ -1,4 +1,3 @@
-import React from 'react';
 import { Activity, DatabaseZap, Cpu } from 'lucide-react';
 
 export function PerformanceHUD() {

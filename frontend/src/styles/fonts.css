@@ -1,1 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+/* §2.4 — one sans family everywhere (Inter), differentiated by weight and size
+   only. The retired scheme's separate display serif (IBM Plex Serif) and
+   monospace (JetBrains Mono) imports are gone — the Data role's
+   `font-variant-numeric: tabular-nums` is an Inter feature, not a font swap. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');

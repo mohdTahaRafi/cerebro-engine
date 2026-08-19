@@ -1,4 +1,3 @@
-import React from 'react';
 import { ResultCard, ResultCardProps } from './ResultCard';
 
 const mockResults: ResultCardProps[] = [

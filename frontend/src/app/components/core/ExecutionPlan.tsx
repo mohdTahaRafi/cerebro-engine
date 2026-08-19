@@ -73,20 +73,20 @@ function StageRow({ row, totalMs, firstTokenMs }: { row: Row; totalMs: number; f
       <span className="w-3 shrink-0 self-stretch relative">
         {bracket !== 'none' && (
           <>
-            <span className={`absolute left-0 w-[2px] bg-[#444] ${
+            <span className={`absolute left-0 w-[2px] bg-line-strong ${
               bracket === 'top' ? 'top-1/2 bottom-0' : bracket === 'bottom' ? 'top-0 bottom-1/2' : 'top-0 bottom-0'
             }`} />
-            <span className="absolute left-0 top-1/2 w-2 h-[2px] bg-[#444]" />
+            <span className="absolute left-0 top-1/2 w-2 h-[2px] bg-line-strong" />
           </>
         )}
       </span>
 
-      <div className="flex-1 relative h-4 bg-[#0D0D0D] border border-[#222]">
+      <div className="flex-1 relative h-4 bg-surface-sunken border border-line-subtle">
         <div
           className={`absolute top-0 bottom-0 ${
             skipped
               ? 'bg-[repeating-linear-gradient(45deg,#2a2a2a,#2a2a2a_4px,#161616_4px,#161616_8px)] cursor-help'
-              : 'bg-[#00FF41]/70 border border-[#00FF41]'
+              : 'bg-positive/70 border border-positive'
           }`}
           style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
           title={skipped ? `skipped — ${spec.skippedReason}` : `starts at ${startMs}ms, runs ${durationMs}ms`}
@@ -100,7 +100,7 @@ function StageRow({ row, totalMs, firstTokenMs }: { row: Row; totalMs: number; f
         )}
       </div>
 
-      <span className={`w-32 shrink-0 text-right font-bold text-xs ${skipped ? 'text-gray-600 italic' : 'text-[#00FF41]'}`}>
+      <span className={`w-32 shrink-0 text-right font-bold text-xs ${skipped ? 'text-gray-600 italic' : 'text-positive'}`}>
         {skipped ? 'skipped' : `${durationMs}ms`}
       </span>
     </div>
@@ -112,15 +112,15 @@ export function ExecutionPlan({ telemetry, isGenerating, runId, langsmith }: Exe
   const link = hasData ? langSmithUrl(langsmith, runId) : null;
 
   return (
-    <div className="border-b border-[#333] bg-[#0A0A0A] flex flex-col font-mono text-xs text-white relative overflow-hidden shrink-0">
-      <div className="h-10 border-b border-[#333] flex items-center justify-between px-4 uppercase font-bold text-gray-500 tracking-wider bg-[#0F0F0F] shrink-0">
+    <div className="border-b border-line bg-surface-sunken flex flex-col font-mono text-xs text-white relative overflow-hidden shrink-0">
+      <div className="h-10 border-b border-line flex items-center justify-between px-4 uppercase font-bold text-gray-500 tracking-wider bg-surface-sunken shrink-0">
         <span className="flex items-center gap-2">
-          <Zap size={12} className={hasData ? 'text-[#00FF41]' : 'text-gray-600'} />
+          <Zap size={12} className={hasData ? 'text-positive' : 'text-gray-600'} />
           Execution Plan
         </span>
         <div className="flex items-center gap-3">
           {hasData && (
-            <span className="text-[#00FF41] text-[10px] bg-[#00FF41]/10 px-2 py-0.5 border border-[#00FF41]/30">
+            <span className="text-positive text-[10px] bg-positive/10 px-2 py-0.5 border border-positive/30">
               TOTAL: {telemetry!.totalMs}ms
             </span>
           )}
@@ -130,7 +130,7 @@ export function ExecutionPlan({ telemetry, isGenerating, runId, langsmith }: Exe
                 href={link}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#00FF41] transition-colors normal-case tracking-normal"
+                className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-positive transition-colors normal-case tracking-normal"
                 title="Open this run's full trace in LangSmith"
               >
                 <ExternalLink size={11} /> LangSmith
@@ -165,7 +165,7 @@ export function ExecutionPlan({ telemetry, isGenerating, runId, langsmith }: Exe
 
             {/* Same grid as a StageRow (w-28 / w-3 / flex-1 / w-32) so the axis lines up
                 under the bars rather than floating free of them. */}
-            <div className="flex items-center gap-2 h-6 border-t border-[#333] mt-1 pt-1">
+            <div className="flex items-center gap-2 h-6 border-t border-line mt-1 pt-1">
               <span className="w-28 shrink-0 text-gray-500 uppercase text-[10px] tracking-widest font-bold text-right">total</span>
               <span className="w-3 shrink-0" />
               <div className="flex-1 flex justify-between text-[9px] text-gray-600">

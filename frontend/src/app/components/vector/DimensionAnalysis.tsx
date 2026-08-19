@@ -1,4 +1,3 @@
-import React from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 
 interface DimensionData {
@@ -22,30 +21,30 @@ const mockDimensions: DimensionData[] = [
 
 export function DimensionAnalysis() {
   return (
-    <div className="w-80 bg-[#020617] border-r border-[#333] flex flex-col shrink-0 overflow-hidden">
+    <div className="w-80 bg-surface border-r border-line flex flex-col shrink-0 overflow-hidden">
       {/* Header */}
-      <div className="h-10 border-b border-[#333] bg-[#020617] flex items-center px-4 shrink-0">
-        <div className="text-[#00FF41] font-mono text-xs uppercase tracking-wider font-bold">
+      <div className="h-10 border-b border-line bg-surface flex items-center px-4 shrink-0">
+        <div className="text-positive font-mono text-xs uppercase tracking-wider font-bold">
           DIMENSION ANALYSIS
         </div>
       </div>
 
       {/* Dimension List */}
       <div className="flex-1 overflow-y-auto">
-        {mockDimensions.map((dim, idx) => (
+        {mockDimensions.map((dim) => (
           <div
             key={dim.id}
-            className="border-b border-[#333] p-4 hover:bg-[#00FF41]/5 transition-none"
+            className="border-b border-line p-4 hover:bg-positive/5 transition-none"
           >
             {/* Dimension Header */}
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-xs">
                 <span className="text-gray-500">DIM_</span>
-                <span className="text-[#00FF41]">{dim.id.toString().padStart(3, '0')}</span>
+                <span className="text-positive">{dim.id.toString().padStart(3, '0')}</span>
               </div>
               <div className="flex items-center gap-2">
                 {dim.value > 0 ? (
-                  <TrendingUp size={12} className="text-[#00FF41]" />
+                  <TrendingUp size={12} className="text-positive" />
                 ) : (
                   <TrendingDown size={12} className="text-gray-500" />
                 )}
@@ -60,7 +59,7 @@ export function DimensionAnalysis() {
               {dim.sparkline.map((val, i) => (
                 <div
                   key={i}
-                  className="flex-1 bg-[#00FF41]"
+                  className="flex-1 bg-positive"
                   style={{
                     height: `${val * 100}%`,
                     opacity: 0.3 + val * 0.5
@@ -77,14 +76,14 @@ export function DimensionAnalysis() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">CONTRIB</span>
-                <span className="text-[#00FF41]">{dim.contribution.toFixed(1)}%</span>
+                <span className="text-positive">{dim.contribution.toFixed(1)}%</span>
               </div>
             </div>
 
             {/* Contribution bar */}
-            <div className="mt-2 h-1 bg-[#111827] overflow-hidden">
+            <div className="mt-2 h-1 bg-surface-raised overflow-hidden">
               <div
-                className="h-full bg-[#00FF41]"
+                className="h-full bg-positive"
                 style={{ width: `${dim.contribution}%` }}
               />
             </div>
@@ -93,10 +92,10 @@ export function DimensionAnalysis() {
       </div>
 
       {/* Footer Summary */}
-      <div className="h-16 border-t border-[#333] bg-[#020617] p-4 shrink-0 font-mono text-[10px] space-y-1">
+      <div className="h-16 border-t border-line bg-surface p-4 shrink-0 font-mono text-[10px] space-y-1">
         <div className="flex justify-between">
           <span className="text-gray-500">TOP 8 DIMS</span>
-          <span className="text-[#00FF41]">88.0% VARIANCE</span>
+          <span className="text-positive">88.0% VARIANCE</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-500">REMAINING</span>

@@ -1,5 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { Target, ZoomIn, ZoomOut } from 'lucide-react';
+import { useRef, useEffect, useState } from 'react';
 
 interface DataPoint {
   x: number;
@@ -16,7 +15,7 @@ export function VectorSpace3D() {
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
   const [queryActive, setQueryActive] = useState(true);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
 
   // Generate thousands of data points
   const dataPoints = useRef<DataPoint[]>([]);
@@ -233,11 +232,11 @@ export function VectorSpace3D() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#020617] border-b border-[#333] relative">
+    <div className="flex-1 flex flex-col bg-surface border-b border-line relative">
       {/* Header */}
-      <div className="h-10 border-b border-[#333] bg-[#020617] flex items-center justify-between px-4 shrink-0">
+      <div className="h-10 border-b border-line bg-surface flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="text-[#00FF41] font-mono text-xs uppercase tracking-wider font-bold">
+          <div className="text-positive font-mono text-xs uppercase tracking-wider font-bold">
             3D UMAP PROJECTION
           </div>
           <div className="text-gray-500 font-mono text-[10px]">
@@ -250,7 +249,7 @@ export function VectorSpace3D() {
             onClick={() => setQueryActive(!queryActive)}
             className={`px-2 py-1 border font-mono text-[10px] uppercase tracking-wider transition-none ${
               queryActive
-                ? 'border-[#00FF41] text-[#00FF41] bg-[#00FF41]/10'
+                ? 'border-positive text-positive bg-positive/10'
                 : 'border-gray-600 text-gray-500'
             }`}
           >
@@ -272,14 +271,14 @@ export function VectorSpace3D() {
 
         {/* Coordinate system indicator */}
         <div className="absolute bottom-4 left-4 font-mono text-[10px] text-gray-500 space-y-1 pointer-events-none select-none">
-          <div>X: <span className="text-[#00FF41]">{rotation.y.toFixed(2)}°</span></div>
-          <div>Y: <span className="text-[#00FF41]">{rotation.x.toFixed(2)}°</span></div>
+          <div>X: <span className="text-positive">{rotation.y.toFixed(2)}°</span></div>
+          <div>Y: <span className="text-positive">{rotation.x.toFixed(2)}°</span></div>
           <div className="text-[8px] text-gray-600 mt-2">DRAG TO ROTATE</div>
         </div>
 
         {/* Stats overlay */}
-        <div className="absolute top-4 right-4 font-mono text-[10px] bg-[#020617]/80 border border-[#333] p-3 space-y-1 pointer-events-none select-none">
-          <div className="text-[#00FF41] uppercase tracking-wider mb-2">VECTOR SPACE STATS</div>
+        <div className="absolute top-4 right-4 font-mono text-[10px] bg-surface/80 border border-line p-3 space-y-1 pointer-events-none select-none">
+          <div className="text-positive uppercase tracking-wider mb-2">VECTOR SPACE STATS</div>
           <div>DIMENSIONS: <span className="text-white">384</span></div>
           <div>EMBEDDINGS: <span className="text-white">3,000</span></div>
           <div>SIMILARITY: <span className="text-white">COSINE</span></div>

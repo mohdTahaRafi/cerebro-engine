@@ -52,10 +52,10 @@ export function GlobalDropzone({ children }: { children: React.ReactNode }) {
       {children}
       
       {isDragActive && (
-        <div className="absolute inset-0 z-50 bg-[#00FF41]/10 backdrop-blur-sm border-4 border-dashed border-[#00FF41] flex flex-col items-center justify-center pointer-events-none transition-all">
-           <UploadCloud size={64} className="text-[#00FF41] mb-4 animate-bounce" />
-           <h2 className="text-3xl font-bold text-white tracking-widest uppercase shadow-black drop-shadow-md">Drop to Ingest</h2>
-           <p className="text-[#00FF41] font-mono mt-2 shadow-black drop-shadow-md">File will be embedded and added to Cerebro</p>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center border-4 border-dashed border-signal bg-signal-soft backdrop-blur-sm pointer-events-none transition-all">
+           <UploadCloud size={64} className="mb-4 text-signal animate-bounce" />
+           <h2 className="text-2xl font-bold text-ink">Drop to ingest</h2>
+           <p className="mt-2 text-sm text-signal">The file will be embedded and added to Cerebro</p>
         </div>
       )}
     </div>

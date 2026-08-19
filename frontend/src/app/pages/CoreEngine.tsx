@@ -27,7 +27,7 @@ export function CoreEngine() {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* Far-Left Sidebar: Ingestion Zone */}
-      <div className="w-[260px] flex-shrink-0 border-r border-[#333] bg-[#0A0A0A] p-4 flex flex-col overflow-y-auto custom-scrollbar">
+      <div className="w-[260px] flex-shrink-0 border-r border-line bg-surface-sunken p-4 flex flex-col overflow-y-auto custom-scrollbar">
         <IngestionZone />
       </div>
 
@@ -35,10 +35,10 @@ export function CoreEngine() {
       <QueryConsole onSearch={handleQuery} onStop={stopGenerating} isSearching={isGenerating} />
 
       {/* Center Pane: Execution Plan (Top) & Provenance Panel (Bottom) */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#050505] relative">
+      <div className="flex-1 flex flex-col overflow-hidden bg-surface relative">
         {/* Error Alert */}
         {chatError && (
-           <div className="absolute top-0 left-0 right-0 bg-[#FF003C] text-white font-bold p-3 text-center uppercase tracking-[0.2em] font-mono z-50 animate-pulse shadow-[0_0_20px_#FF003C]">
+           <div className="absolute top-0 left-0 right-0 bg-critical text-white font-bold p-3 text-center uppercase tracking-[0.2em] font-mono z-50 animate-pulse shadow-2">
               ⚠️ NETWORK ERROR: {chatError} ⚠️
            </div>
         )}

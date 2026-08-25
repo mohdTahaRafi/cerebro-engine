@@ -6,10 +6,10 @@ import { BookMarked, Compass, Eye, Lock, LifeBuoy, ShieldCheck, SlidersHorizonta
 import type { AuthFeatureRow } from './AuthShell';
 
 export const PRODUCT_FEATURE_ROWS: AuthFeatureRow[] = [
-  { icon: BookMarked, title: 'Cited answers', description: 'Every answer is linked to the exact source.' },
-  { icon: Eye, title: 'Full transparency', description: 'Inspect retrieval, rankings, prompts, and model behavior.' },
-  { icon: Compass, title: 'Explore your data', description: 'Visualize document embeddings in interactive 3D.' },
   { icon: ShieldCheck, title: 'Private & secure', description: 'Your data stays isolated and encrypted.' },
+  { icon: BookMarked, title: 'Cited answers', description: 'Every answer is linked to the exact source.' },
+  { icon: Compass, title: 'Explore your data', description: 'Visualize document embeddings in interactive 3D.' },
+  { icon: Eye, title: 'Full transparency', description: 'Inspect retrieval, rankings, prompts, and model behavior.' },
 ];
 
 export const RESET_FEATURE_ROWS: AuthFeatureRow[] = [

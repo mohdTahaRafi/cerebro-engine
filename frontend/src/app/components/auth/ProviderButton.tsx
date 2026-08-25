@@ -3,6 +3,7 @@
 // /signup so capabilities.providers drives the same set on both.
 import { Github } from 'lucide-react';
 import { Button } from '../ui/button';
+import { cn } from '../ui/utils';
 
 function GoogleGlyph() {
   return (
@@ -20,20 +21,29 @@ const PROVIDER_META = {
   github: { label: 'GitHub', Icon: Github },
 } as const;
 
-export function ProviderButton({ provider }: { provider: 'google' | 'github' }) {
+export function ProviderButton({
+  provider,
+  action = 'Sign in',
+  className,
+}: {
+  provider: 'google' | 'github';
+  /** "Sign in" on /login, "Sign up" on /signup — same button, page-appropriate verb. */
+  action?: 'Sign in' | 'Sign up';
+  className?: string;
+}) {
   const { label, Icon } = PROVIDER_META[provider];
   return (
     <Button
       type="button"
       variant="outline"
-      className="w-full gap-2 border-line bg-surface-raised"
+      className={cn('w-full gap-2 border-line bg-surface-raised', className)}
       // Phase 5 wires the real redirect; the mock has no server-side OAuth to hand off
       // to, so this is inert (not a button that lies about success) until then.
       disabled
       title="Available once the backend auth service lands (Phase 5)"
     >
       <Icon className="size-4" aria-hidden="true" />
-      Sign in with {label}
+      {action} with {label}
     </Button>
   );
 }

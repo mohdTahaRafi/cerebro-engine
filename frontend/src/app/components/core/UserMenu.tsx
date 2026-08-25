@@ -41,7 +41,7 @@ export function UserMenu({ trigger }: UserMenuProps) {
         <DropdownMenuLabel className="flex items-center gap-3 py-2 font-normal">
           <Avatar className="size-9">
             {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
-            <AvatarFallback className="bg-signal-soft text-sm font-medium text-signal">
+            <AvatarFallback className="bg-ink text-sm font-medium text-surface">
               {initials(user.name, user.email)}
             </AvatarFallback>
           </Avatar>

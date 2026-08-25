@@ -3,7 +3,7 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mail } from 'lucide-react';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { PRODUCT_FEATURE_ROWS } from '../../components/auth/featureRows';
 import { ProviderButton } from '../../components/auth/ProviderButton';
@@ -60,15 +60,13 @@ export function Login() {
   return (
     <AuthShell
       headline={['Answers you can trust,', 'grounded in your data.']}
-      supportingText="Upload your documents, ask questions, and get answers backed by the exact passages that matter."
+      supportingText="Upload your documents, ask questions, and get answers backed by the exact passages that matter. Built for clarity. Designed for trust."
       features={PRODUCT_FEATURE_ROWS}
-      headerLinkLabel="Don't have an account? Sign up"
-      headerLinkTo="/signup"
     >
-      <div className="w-full rounded-lg border border-line bg-surface-raised p-8 shadow-1">
-        <div className="mb-6 flex flex-col gap-1">
-          <h2 className="text-3xl font-bold text-ink">Welcome back</h2>
-          <p className="text-sm text-ink-secondary">Sign in to your Cerebro account</p>
+      <div className="w-[600px] max-w-full rounded-2xl border border-line bg-surface-raised px-9 py-10 shadow-1">
+        <div className="mb-8 flex flex-col gap-2">
+          <h2 className="text-[34px] font-bold leading-tight text-ink">Welcome back</h2>
+          <p className="text-[18px] text-ink-secondary">Sign in to your Cerebro account</p>
         </div>
 
         {banner && !formError && (
@@ -83,21 +81,26 @@ export function Login() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="login-email">Email</Label>
-            <Input
-              id="login-email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              required
-              disabled={pending}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={!!fieldErrors.email}
-              aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
-            />
+        <form onSubmit={onSubmit} className="flex flex-col gap-6" noValidate>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="login-email" className="text-[15px] font-semibold text-ink">Email</Label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-graphite" aria-hidden="true" />
+              <Input
+                id="login-email"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+                placeholder="you@company.com"
+                required
+                disabled={pending}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={!!fieldErrors.email}
+                aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
+                className="h-[54px] rounded-[10px] border-line-strong pl-11 text-[16px]"
+              />
+            </div>
             {fieldErrors.email && <p id="login-email-error" role="alert" className="text-xs text-critical">{fieldErrors.email}</p>}
           </div>
 
@@ -108,19 +111,21 @@ export function Login() {
             autoComplete="current-password"
             disabled={pending}
             error={fieldErrors.password}
+            showLeftIcon
+            inputClassName="h-[54px] rounded-[10px] border-line-strong text-[16px]"
             labelExtra={
-              <Link to="/forgot-password" className="text-xs font-medium text-signal outline-none hover:text-signal-hover focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
+              <Link to="/forgot-password" className="text-sm font-medium text-signal outline-none hover:text-signal-hover focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
                 Forgot password?
               </Link>
             }
           />
 
-          <label className="flex items-center gap-2 text-sm text-ink-secondary">
-            <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} disabled={pending} />
+          <label className="flex items-center gap-2.5 text-sm text-ink-secondary">
+            <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} disabled={pending} className="size-5" />
             Remember me
           </label>
 
-          <Button type="submit" disabled={pending} className="w-full bg-signal text-signal-on hover:bg-signal-hover">
+          <Button type="submit" disabled={pending} className="h-[54px] w-full rounded-[10px] bg-signal text-[16px] font-semibold text-signal-on hover:bg-signal-hover">
             {pending ? (
               <>
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -132,18 +137,22 @@ export function Login() {
 
         {capabilities && capabilities.providers.length > 0 && (
           <>
-            <div className="my-5 flex items-center gap-3" aria-hidden="true">
+            <div className="my-7 flex items-center gap-3" aria-hidden="true">
               <div className="h-px flex-1 bg-line" />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-graphite">or continue with</span>
+              <span className="text-[13px] text-graphite">or continue with</span>
               <div className="h-px flex-1 bg-line" />
             </div>
-            <div className="flex flex-col gap-2">
-              {capabilities.providers.map((p) => <ProviderButton key={p} provider={p} />)}
+            <div className="flex flex-col gap-3">
+              {capabilities.providers
+                // The login card matches Cerebro's approved auth design, which offers
+                // Google only — GitHub stays on /signup until product decides to add it here.
+                .filter((p) => p !== 'github')
+                .map((p) => <ProviderButton key={p} provider={p} className="h-[54px] rounded-[10px] text-[16px]" />)}
             </div>
           </>
         )}
 
-        <p className="mt-6 text-center text-sm text-ink-secondary">
+        <p className="mt-8 text-center text-[15px] text-ink-secondary">
           Don't have an account?{' '}
           <Link to="/signup" className="font-medium text-signal outline-none hover:text-signal-hover focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
             Sign up

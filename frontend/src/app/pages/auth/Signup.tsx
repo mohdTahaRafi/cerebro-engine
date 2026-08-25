@@ -5,7 +5,7 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mail, User } from 'lucide-react';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { PRODUCT_FEATURE_ROWS } from '../../components/auth/featureRows';
 import { ProviderButton } from '../../components/auth/ProviderButton';
@@ -13,6 +13,7 @@ import { BackendUnreachable } from '../../components/design/BackendUnreachable';
 import { RouteLoading } from '../../components/design/RouteLoading';
 import { PasswordField } from '../../components/design/PasswordField';
 import { Button } from '../../components/ui/button';
+import { Checkbox } from '../../components/ui/checkbox';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { useAuth } from '../../context/AuthContext';
@@ -26,6 +27,8 @@ export function Signup() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [pending, setPending] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -37,15 +40,23 @@ export function Signup() {
   }
 
   const minLength = capabilities?.passwordMinLength ?? 12;
+  const inputClass = 'h-[50px] rounded-[10px] border-line-strong pl-11 text-[16px]';
+  const labelClass = 'text-[15px] font-semibold text-ink';
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
     setFieldErrors({});
-    if (password.length < minLength) {
-      setFieldErrors({ password: `Use at least ${minLength} characters.` });
+
+    const errors: Record<string, string> = {};
+    if (password.length < minLength) errors.password = `Use at least ${minLength} characters.`;
+    if (confirmPassword !== password) errors.confirmPassword = "Passwords don't match.";
+    if (!agreed) errors.terms = 'Agree to the Terms of Service and Privacy Policy to continue.';
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
       return;
     }
+
     setPending(true);
     try {
       const user = await signUp({ email, password, name: name.trim() || undefined });
@@ -71,16 +82,22 @@ export function Signup() {
 
   return (
     <AuthShell
-      headline={['Private workspaces,', 'built for your documents.']}
-      supportingText="Join Cerebro and start asking questions about your documents."
+      headline={['Create your Cerebro', 'account']}
+      supportingText="Upload your documents, ask questions, and get answers backed by the exact passages that matter. Built for clarity. Designed for trust."
       features={PRODUCT_FEATURE_ROWS}
       headerLinkLabel="Already have an account? Sign in"
       headerLinkTo="/login"
     >
-      <div className="w-full rounded-lg border border-line bg-surface-raised p-8 shadow-1">
-        <div className="mb-6 flex flex-col gap-1">
-          <h2 className="text-3xl font-bold text-ink">Create your account</h2>
-          <p className="text-sm text-ink-secondary">Join Cerebro and start asking questions about your documents.</p>
+      <div className="w-[600px] max-w-full rounded-2xl border border-line bg-surface-raised px-9 py-5 shadow-1">
+        {/* Elastic (clamp) spacing below, not fixed breakpoint values: it scales with
+            viewport HEIGHT so the card genuinely fits at any desktop window size between
+            a short 13" laptop and a tall external monitor, not just the two heights we
+            happened to test (§1/§3/§11 of the no-scroll pass — "the layout remains
+            robust"). Input height and type stay fixed per that same pass: only the
+            whitespace between elements (and, modestly, card padding) is negotiable. */}
+        <div className="mb-[clamp(0.625rem,1.6vh,1.25rem)] flex flex-col gap-1.5">
+          <h2 className="text-[32px] font-bold leading-tight text-ink">Create your account</h2>
+          <p className="text-[17px] text-ink-secondary">Join Cerebro and start asking questions about your documents.</p>
         </div>
 
         {formError && (
@@ -89,31 +106,48 @@ export function Signup() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="signup-name">Name</Label>
-            <Input id="signup-name" autoComplete="name" disabled={pending} value={name} onChange={(e) => setName(e.target.value)} />
+        <form onSubmit={onSubmit} className="flex flex-col gap-[clamp(0.5rem,1.5vh,1.25rem)]" noValidate>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="signup-name" className={labelClass}>Full name</Label>
+            <div className="relative">
+              <User className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-graphite" aria-hidden="true" />
+              <Input
+                id="signup-name"
+                autoComplete="name"
+                placeholder="Enter your full name"
+                disabled={pending}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputClass}
+              />
+            </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="signup-email">Email</Label>
-            <Input
-              id="signup-email"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              required
-              disabled={pending}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={!!fieldErrors.email}
-              aria-describedby={fieldErrors.email ? 'signup-email-error' : undefined}
-            />
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="signup-email" className={labelClass}>Work email</Label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-graphite" aria-hidden="true" />
+              <Input
+                id="signup-email"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+                placeholder="you@company.com"
+                required
+                disabled={pending}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={!!fieldErrors.email}
+                aria-describedby={fieldErrors.email ? 'signup-email-error' : undefined}
+                className={inputClass}
+              />
+            </div>
             {fieldErrors.email && <p id="signup-email-error" role="alert" className="text-xs text-critical">{fieldErrors.email}</p>}
           </div>
 
           <PasswordField
             label="Password"
+            placeholder="Create a password"
             value={password}
             onChange={setPassword}
             autoComplete="new-password"
@@ -122,9 +156,46 @@ export function Signup() {
             disabled={pending}
             error={fieldErrors.password}
             helpText={`At least ${minLength} characters. Longer is better than more complicated.`}
+            showLeftIcon
+            labelClassName={labelClass}
+            inputClassName="h-[50px] rounded-[10px] border-line-strong text-[16px]"
           />
 
-          <Button type="submit" disabled={pending} className="w-full bg-signal text-signal-on hover:bg-signal-hover">
+          <PasswordField
+            label="Confirm password"
+            placeholder="Confirm your password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            disabled={pending}
+            error={fieldErrors.confirmPassword}
+            showLeftIcon
+            labelClassName={labelClass}
+            inputClassName="h-[50px] rounded-[10px] border-line-strong text-[16px]"
+          />
+
+          <div className="flex flex-col gap-1.5">
+            <label className="flex items-start gap-3 text-sm text-ink-secondary">
+              <Checkbox
+                checked={agreed}
+                onCheckedChange={(v) => setAgreed(v === true)}
+                disabled={pending}
+                aria-invalid={!!fieldErrors.terms}
+                className="mt-0.5 size-5"
+              />
+              <span>
+                I agree to the <span className="font-medium text-signal">Terms of Service</span> and{' '}
+                <span className="font-medium text-signal">Privacy Policy</span>
+              </span>
+            </label>
+            {fieldErrors.terms && <p role="alert" className="pl-8 text-xs text-critical">{fieldErrors.terms}</p>}
+          </div>
+
+          <Button
+            type="submit"
+            disabled={pending}
+            className="h-[50px] w-full rounded-[10px] bg-signal text-[16px] font-semibold text-signal-on hover:bg-signal-hover"
+          >
             {pending ? (
               <>
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -136,18 +207,20 @@ export function Signup() {
 
         {capabilities && capabilities.providers.length > 0 && (
           <>
-            <div className="my-5 flex items-center gap-3" aria-hidden="true">
+            <div className="my-[clamp(0.625rem,1.6vh,1.25rem)] flex items-center gap-3" aria-hidden="true">
               <div className="h-px flex-1 bg-line" />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-graphite">or continue with</span>
+              <span className="text-[13px] text-graphite">or continue with</span>
               <div className="h-px flex-1 bg-line" />
             </div>
-            <div className="flex flex-col gap-2">
-              {capabilities.providers.map((p) => <ProviderButton key={p} provider={p} />)}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:[&>*:only-child]:col-span-2">
+              {capabilities.providers.map((p) => (
+                <ProviderButton key={p} provider={p} action="Sign up" className="h-[50px] rounded-[10px] text-[16px]" />
+              ))}
             </div>
           </>
         )}
 
-        <p className="mt-6 text-center text-sm text-ink-secondary">
+        <p className="mt-[clamp(0.625rem,1.5vh,1.25rem)] text-center text-[15px] text-ink-secondary">
           Already have an account?{' '}
           <Link to="/login" className="font-medium text-signal outline-none hover:text-signal-hover focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
             Sign in

@@ -16,7 +16,7 @@ export function ThemeToggle() {
   const active = theme ?? 'system';
 
   return (
-    <div role="radiogroup" aria-label="Theme" className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-surface-sunken p-0.5">
+    <div role="radiogroup" aria-label="Theme" className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-sunken p-1">
       {OPTIONS.map(({ value, icon: Icon, label }) => (
         <button
           key={value}
@@ -27,12 +27,12 @@ export function ThemeToggle() {
           title={label}
           onClick={() => setTheme(value)}
           className={cn(
-            'flex size-7 items-center justify-center rounded-md outline-none transition-colors',
+            'flex size-8 items-center justify-center rounded-full outline-none transition-colors',
             'focus-visible:ring-[3px] focus-visible:ring-signal-ring',
             active === value ? 'bg-surface-raised text-signal shadow-1' : 'text-graphite hover:text-ink-secondary',
           )}
         >
-          <Icon className="size-3.5" aria-hidden="true" />
+          <Icon className="size-4" aria-hidden="true" />
         </button>
       ))}
     </div>

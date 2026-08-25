@@ -2,7 +2,7 @@
 // <button> with aria-pressed, and (on signup) a three-segment advisory strength meter.
 import type { ReactNode } from 'react';
 import { useId, useState } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Lock } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { cn } from '../ui/utils';
@@ -33,6 +33,7 @@ interface PasswordFieldProps {
   value: string;
   onChange: (value: string) => void;
   autoComplete: 'current-password' | 'new-password';
+  placeholder?: string;
   showStrength?: boolean;
   minLength?: number;
   helpText?: string;
@@ -40,11 +41,17 @@ interface PasswordFieldProps {
   onBlur?: () => void;
   disabled?: boolean;
   labelExtra?: ReactNode;
+  labelClassName?: string;
+  /** Shows a lock glyph inside the field's left edge — used on the login/signup cards
+   *  to match the icon-led input treatment (DESIGN.md §6.1). Off by default so the
+   *  reset-password flow's plain field is unaffected. */
+  showLeftIcon?: boolean;
+  inputClassName?: string;
 }
 
 export function PasswordField({
-  label, value, onChange, autoComplete, showStrength, minLength = 12,
-  helpText, error, onBlur, disabled, labelExtra,
+  label, value, onChange, autoComplete, placeholder, showStrength, minLength = 12,
+  helpText, error, onBlur, disabled, labelExtra, labelClassName, showLeftIcon, inputClassName,
 }: PasswordFieldProps) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -52,25 +59,29 @@ export function PasswordField({
   const strength = showStrength ? computePasswordStrength(value, minLength) : 0;
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between">
-        <Label htmlFor={id}>{label}</Label>
+        <Label htmlFor={id} className={labelClassName}>{label}</Label>
         {labelExtra}
       </div>
       <div className="relative">
+        {showLeftIcon && (
+          <Lock className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-graphite" aria-hidden="true" />
+        )}
         <Input
           id={id}
           type={visible ? 'text' : 'password'}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
+          placeholder={placeholder}
           autoComplete={autoComplete}
           minLength={autoComplete === 'new-password' ? minLength : undefined}
           required
           disabled={disabled}
           aria-invalid={!!error}
           aria-describedby={error ? errorId : undefined}
-          className="pr-10"
+          className={cn('pr-10', showLeftIcon && 'pl-11', inputClassName)}
         />
         <button
           type="button"
@@ -96,7 +107,7 @@ export function PasswordField({
         </div>
       )}
 
-      {helpText && !error && <p className="text-xs text-graphite">{helpText}</p>}
+      {helpText && !error && <p className="text-[13px] text-graphite">{helpText}</p>}
       {error && <p id={errorId} role="alert" className="text-xs text-critical">{error}</p>}
     </div>
   );

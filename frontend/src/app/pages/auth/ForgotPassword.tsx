@@ -6,7 +6,7 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { Loader2, Lock, Mail } from 'lucide-react';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { RESET_FEATURE_ROWS } from '../../components/auth/featureRows';
 import { BackendUnreachable } from '../../components/design/BackendUnreachable';
@@ -59,14 +59,14 @@ export function ForgotPassword() {
       headerLinkLabel="Back to sign in"
       headerLinkTo="/login"
     >
-      <div className="w-full rounded-lg border border-line bg-surface-raised p-8 shadow-1">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-signal-soft">
-            <KeyRound className="size-5 text-signal" aria-hidden="true" />
+      <div className="w-[600px] max-w-full rounded-2xl border border-line bg-surface-raised px-9 py-10 shadow-1">
+        <div className="mb-8 flex flex-col items-center gap-5 text-center">
+          <div className="flex size-[88px] shrink-0 items-center justify-center rounded-full bg-signal-soft">
+            <Lock className="size-10 text-signal" aria-hidden="true" strokeWidth={1.75} />
           </div>
-          <div className="flex flex-col gap-1">
-            <h2 className="text-2xl font-bold text-ink">Forgot your password?</h2>
-            <p className="text-sm text-ink-secondary">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-[32px] font-bold leading-tight text-ink">Forgot your password?</h2>
+            <p className="max-w-[420px] text-[17px] leading-[1.5] text-ink-secondary">
               No worries. Enter your work email and we'll send you a secure link to reset it.
             </p>
           </div>
@@ -78,26 +78,31 @@ export function ForgotPassword() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="forgot-identifier">Work email</Label>
-            <Input
-              id="forgot-identifier"
-              type="email"
-              inputMode="email"
-              autoComplete="username"
-              required
-              disabled={pending}
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-            />
+        <form onSubmit={onSubmit} className="flex flex-col gap-6" noValidate>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="forgot-identifier" className="text-[15px] font-semibold text-ink">Work email</Label>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-4 top-1/2 size-[18px] -translate-y-1/2 text-graphite" aria-hidden="true" />
+              <Input
+                id="forgot-identifier"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+                placeholder="you@company.com"
+                required
+                disabled={pending}
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                className="h-[54px] rounded-[10px] border-line-strong pl-11 text-[16px]"
+              />
+            </div>
           </div>
 
           {showChannelSelector && (
             <fieldset className="flex flex-col gap-2">
-              <legend className="text-sm font-medium text-ink">Send code via</legend>
+              <legend className="text-[15px] font-semibold text-ink">Send code via</legend>
               {capabilities!.otpChannels.map((c) => (
-                <label key={c} className="flex items-center gap-2 text-sm text-ink-secondary">
+                <label key={c} className="flex items-center gap-2 text-[15px] text-ink-secondary">
                   <input type="radio" name="otp-channel" checked={channel === c} onChange={() => setChannel(c)} />
                   {c === 'email' ? 'Email' : 'Text message'}
                 </label>
@@ -105,7 +110,7 @@ export function ForgotPassword() {
             </fieldset>
           )}
 
-          <Button type="submit" disabled={pending} className="w-full bg-signal text-signal-on hover:bg-signal-hover">
+          <Button type="submit" disabled={pending} className="h-[54px] w-full rounded-[10px] bg-signal text-[16px] font-semibold text-signal-on hover:bg-signal-hover">
             {pending ? (
               <>
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -115,12 +120,17 @@ export function ForgotPassword() {
           </Button>
         </form>
 
-        <div className="my-5 flex items-center gap-3" aria-hidden="true">
+        <div className="my-8 flex items-center gap-3" aria-hidden="true">
           <div className="h-px flex-1 bg-line" />
-          <span className="text-[11px] font-medium uppercase tracking-wide text-graphite">Remembered your password?</span>
+          <span className="text-[13px] text-graphite">Remembered your password?</span>
           <div className="h-px flex-1 bg-line" />
         </div>
-        <Button type="button" variant="secondary" className="w-full" onClick={() => navigate('/login')}>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-[54px] w-full rounded-[10px] border-line bg-surface-raised text-[16px] font-medium text-ink hover:bg-surface-sunken"
+          onClick={() => navigate('/login')}
+        >
           Back to sign in
         </Button>
       </div>

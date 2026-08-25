@@ -11,22 +11,25 @@ import { useTheme } from 'next-themes';
 import { Sidebar } from '../components/core/Sidebar';
 import { TopHeader } from '../components/core/TopHeader';
 import { EngineProvider } from '../context/EngineContext';
+import { ContextScopeProvider } from '../context/ContextScopeContext';
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const { resolvedTheme } = useTheme();
 
   return (
-    <EngineProvider>
-      <div className="flex h-screen w-screen overflow-hidden bg-surface text-ink">
-        <Sidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <TopHeader />
-          <div className="flex-1 overflow-hidden">
-            {children ?? <Outlet />}
+    <ContextScopeProvider>
+      <EngineProvider>
+        <div className="flex h-screen w-screen overflow-hidden bg-surface text-ink">
+          <Sidebar />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <TopHeader />
+            <div className="flex-1 overflow-hidden">
+              {children ?? <Outlet />}
+            </div>
           </div>
         </div>
-      </div>
-      <Toaster theme={resolvedTheme === 'dark' ? 'dark' : 'light'} position="bottom-right" />
-    </EngineProvider>
+        <Toaster theme={resolvedTheme === 'dark' ? 'dark' : 'light'} position="bottom-right" />
+      </EngineProvider>
+    </ContextScopeProvider>
   );
 }

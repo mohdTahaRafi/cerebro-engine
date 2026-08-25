@@ -11,11 +11,11 @@ export function useThreads() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchThreads = useCallback(async () => {
+  const fetchThreads = useCallback(async (contextId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const { threads: list } = await api.threads.list();
+      const { threads: list } = await api.threads.list(contextId);
       setThreads(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load threads');

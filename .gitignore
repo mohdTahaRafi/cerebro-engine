@@ -182,3 +182,4 @@ __pycache__/
 # ----------------------------------------------------------------------------
 backend/bench/results/
 backend/bench/.tmp/
+.worktrees/

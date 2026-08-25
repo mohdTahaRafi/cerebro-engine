@@ -90,6 +90,11 @@ export interface DocumentRecord {
   textPageCount: number; visualPageCount: number;
   error: string | null; warnings: string[];
   createdAt: string;
+  // A `duplicate` row's original — resolved to a filename client-side (phase_2 §5.3's
+  // tooltip needs the name, and the backend's list route doesn't populate the
+  // `duplicateOf` ref). `null` for a non-duplicate, or for a duplicate whose original
+  // fell outside the loaded page (rare — the original is virtually always more recent).
+  duplicateOfFileName: string | null;
 }
 
 // ── Chat (Epic 3) ───────────────────────────────────────────────────────────
@@ -105,6 +110,12 @@ export interface ProvenanceSource {
   imageUri: string | null; ocrQuality: string | null;
   absorbedChunks: string[] | null;
   branch: SourceBranch | null; fusionRank: number | null; finalRank: number | null;
+  /** phase_4 §3.3 — true when this candidate scored below the trace's `relevanceFloor` and
+   *  was never assigned a `finalRank`. Absent (undefined) on a live chat turn's `sources`
+   *  frame, which only ever carries post-floor survivors; present on a `TraceDetail`'s
+   *  `candidates`, which is deliberately the full pre-floor set (backend
+   *  CandidateSchema.belowFloor, phase_7 §2.1). */
+  belowFloor?: boolean;
 }
 
 /** Unchanged from v1's buildTelemetry (backend/src/telemetry/pipelineTelemetry.js).
@@ -140,9 +151,19 @@ export type AskEvent =
   | { event: 'error';     error: string };
 
 // ── Traces (Epic 4) ─────────────────────────────────────────────────────────
+/** phase_4 §2.3: the list row's <ProvenanceRibbon> is drawn from `telemetry`, exactly like
+ *  the chat ribbon and the detail header — reusing the same data shape is what makes the
+ *  three placements one motif rather than three visualizations. Amended from the phase_1
+ *  draft (which omitted `telemetry`): phase_7 task 7.9's list projection keeps telemetry and
+ *  drops only the heavy `candidates`/`prompt` fields, so the list contract must carry it too. */
 export interface TraceSummary {
   id: string; threadId: string; messageId: string; contextId: string; contextTitle: string;
   query: string; totalMs: number; sourceCount: number;
+  telemetry: PipelineTelemetry;
+  /** Backend TraceSchema.refused (phase_7 §2.1) — the noContext branch ran. Distinct from
+   *  `sourceCount === 0` being merely coincidental: this is the actual product signal the
+   *  ribbon's 'refused' status and the row's "0 sources · refused" text key off. */
+  refused: boolean;
   rerankSkipped: boolean; warningCount: number; createdAt: string;
 }
 export interface TracePromptBlock {
@@ -152,8 +173,12 @@ export interface TracePromptBlock {
 }
 export interface TraceDetail extends TraceSummary {
   condensedQuery: string | null;
-  telemetry: PipelineTelemetry;
   candidates: ProvenanceSource[];      // full pre-floor set, with fusionRank + finalRank
+  /** phase_4 §3.3 — the rule value the RerankMatrix draws beneath the survivors. Read from
+   *  the trace record (the retrieval floor backend/src/retrieval/constants.js applies at
+   *  answer time), never a frontend-hardcoded number — the floor is tuned server-side and a
+   *  stale client constant would silently mislabel the rule on the next backend change. */
+  relevanceFloor: number;
   prompt: TracePromptBlock[];
   tokens: { input: number; output: number; provider: string; model: string } | null;
   runId: string | null;

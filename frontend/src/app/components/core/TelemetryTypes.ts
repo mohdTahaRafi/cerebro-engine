@@ -47,18 +47,22 @@ export interface StageSpec {
   label: string;
   parallelGroup?: string;
   skippedReason: string;
+  /** phase_4 §3.2 — a Tailwind class naming this stage's `--stage-*` token (theme.css),
+   *  shared with ProvenanceRibbon's identically-ordered STAGE_SPECS so the ribbon and the
+   *  Waterfall read as one system: same stage, same color, in the ribbon and in the chart. */
+  colorVar: string;
 }
 
 export const STAGES: StageSpec[] = [
-  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', skippedReason: 'first turn — no history to condense' },
-  { durationKey: 'embedMs', startKey: 'embedStartMs', label: 'embed', parallelGroup: 'encode', skippedReason: 'query embedding unavailable' },
-  { durationKey: 'sparseMs', startKey: 'sparseStartMs', label: 'sparse', parallelGroup: 'encode', skippedReason: 'sparse encoding unavailable' },
-  { durationKey: 'colpaliMs', startKey: 'colpaliStartMs', label: 'colpali', parallelGroup: 'encode', skippedReason: 'vision service unavailable or no visual corpus' },
-  { durationKey: 'chunkRetrieveMs', startKey: 'chunkRetrieveStartMs', label: 'chunk-retrieve', parallelGroup: 'retrieve', skippedReason: 'chunk retrieval unavailable' },
-  { durationKey: 'pageRetrieveMs', startKey: 'pageRetrieveStartMs', label: 'page-retrieve', parallelGroup: 'retrieve', skippedReason: 'no ColPali query vector to retrieve pages with' },
-  { durationKey: 'mergeMs', startKey: 'mergeStartMs', label: 'merge', skippedReason: 'nothing to merge' },
-  { durationKey: 'rerankMs', startKey: 'rerankStartMs', label: 'rerank', skippedReason: 'reranker degraded — results are in fusion order' },
-  { durationKey: 'generateMs', startKey: 'generateStartMs', label: 'generate', skippedReason: 'no sources cleared the relevance floor' },
+  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', colorVar: 'bg-stage-condense', skippedReason: 'first turn — no history to condense' },
+  { durationKey: 'embedMs', startKey: 'embedStartMs', label: 'embed', parallelGroup: 'encode', colorVar: 'bg-stage-embed', skippedReason: 'query embedding unavailable' },
+  { durationKey: 'sparseMs', startKey: 'sparseStartMs', label: 'sparse', parallelGroup: 'encode', colorVar: 'bg-stage-sparse', skippedReason: 'sparse encoding unavailable' },
+  { durationKey: 'colpaliMs', startKey: 'colpaliStartMs', label: 'colpali', parallelGroup: 'encode', colorVar: 'bg-stage-colpali', skippedReason: 'vision service unavailable or no visual corpus' },
+  { durationKey: 'chunkRetrieveMs', startKey: 'chunkRetrieveStartMs', label: 'chunk-retrieve', parallelGroup: 'retrieve', colorVar: 'bg-stage-retrieve', skippedReason: 'chunk retrieval unavailable' },
+  { durationKey: 'pageRetrieveMs', startKey: 'pageRetrieveStartMs', label: 'page-retrieve', parallelGroup: 'retrieve', colorVar: 'bg-stage-retrieve', skippedReason: 'no ColPali query vector to retrieve pages with' },
+  { durationKey: 'mergeMs', startKey: 'mergeStartMs', label: 'merge', colorVar: 'bg-stage-merge', skippedReason: 'nothing to merge' },
+  { durationKey: 'rerankMs', startKey: 'rerankStartMs', label: 'rerank', colorVar: 'bg-stage-rerank', skippedReason: 'reranker degraded — results are in fusion order' },
+  { durationKey: 'generateMs', startKey: 'generateStartMs', label: 'generate', colorVar: 'bg-stage-generate', skippedReason: 'no sources cleared the relevance floor' },
 ];
 
 // Branch attribution for the provenance panel (§2.3) — derived server-side from Qdrant

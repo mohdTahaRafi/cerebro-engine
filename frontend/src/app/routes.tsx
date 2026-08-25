@@ -1,4 +1,5 @@
 // phase_1 §5.3 — the v2 route table.
+import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { AppShell } from './pages/AppShell';
 import { RequireAuth } from './guards/RequireAuth';
@@ -8,13 +9,19 @@ import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { ResetPassword } from './pages/auth/ResetPassword';
 import { NotFound } from './pages/NotFound';
-import { ConsumerDashboard } from './pages/ConsumerDashboard';
+import { Chat } from './pages/Chat';
 import { ContextList } from './pages/contexts/ContextList';
 import { ContextDetail } from './pages/contexts/ContextDetail';
 import { TraceList } from './pages/admin/TraceList';
 import { TraceDetail } from './pages/admin/TraceDetail';
-import { VectorSpace } from './pages/admin/VectorSpace';
 import { Health } from './pages/admin/Health';
+import { RouteLoading } from './components/design/RouteLoading';
+
+// phase_4 task 4.25 — `three` and `@react-three/fiber` are pulled in ONLY by
+// pages/admin/VectorSpace.tsx and everything under components/vectors/. A static import
+// here would bundle both into the shared chunk /chat and /login also load; React.lazy is
+// what actually gives Vite a boundary to split on.
+const VectorSpace = lazy(() => import('./pages/admin/VectorSpace').then((m) => ({ default: m.VectorSpace })));
 
 export const router = createBrowserRouter([
   { path: '/login', Component: Login },              // public
@@ -28,12 +35,15 @@ export const router = createBrowserRouter([
         path: '/', Component: AppShell,               // Sidebar + TopHeader + Outlet
         children: [
           { index: true, element: <Navigate to="/chat" replace /> },
-          { path: 'chat', Component: ConsumerDashboard },
+          { path: 'chat', Component: Chat },
           { path: 'contexts', Component: ContextList },       // Phase 2
           { path: 'contexts/:id', Component: ContextDetail }, // Phase 2
           { path: 'admin/traces', Component: TraceList },     // Phase 4
           { path: 'admin/traces/:id', Component: TraceDetail }, // Phase 4
-          { path: 'admin/vectors', Component: VectorSpace },  // Phase 4
+          {
+            path: 'admin/vectors',
+            element: <Suspense fallback={<RouteLoading />}><VectorSpace /></Suspense>,
+          }, // Phase 4 — lazy: see the VectorSpace import comment above (task 4.25)
         ],
       },
       {

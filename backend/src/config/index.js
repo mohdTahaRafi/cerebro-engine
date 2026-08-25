@@ -7,6 +7,8 @@ const REQUIRED = [
   'VISION_SERVICE_URL',
   'COHERE_API_KEY',
   'LLAMA_CLOUD_API_KEY',
+  'SESSION_SECRET',
+  'PUBLIC_URL',
 ];
 
 function required(name) {
@@ -90,10 +92,37 @@ export const config = {
     // the console renders the run id without a clickable link rather than a broken one.
     orgId: process.env.LANGSMITH_ORG_ID || null,
   },
+
+  auth: {
+    sessionSecret: required('SESSION_SECRET'),     // ≥ 32 chars, fail-fast at startup
+    publicUrl: required('PUBLIC_URL'),             // e.g. https://cerebro.example.com —
+                                                   //   OAuth callback URLs are built from it
+    adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',')
+                   .map((s) => s.trim().toLowerCase()).filter(Boolean),
+    google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET },
+    github: { clientId: process.env.GITHUB_CLIENT_ID, clientSecret: process.env.GITHUB_CLIENT_SECRET },
+  },
+  mail: {
+    host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT ?? 587),
+    user: process.env.SMTP_USER, pass: process.env.SMTP_PASS,
+    from: process.env.MAIL_FROM,
+  },
+  sms: {
+    accountSid: process.env.TWILIO_ACCOUNT_SID, authToken: process.env.TWILIO_AUTH_TOKEN,
+    from: process.env.TWILIO_FROM,
+  },
 };
 
 // Provider-conditional validation: the primary LLM path needs its key.
 if (config.llm.provider === 'anthropic' && !config.llm.anthropic.apiKey) {
   console.error('[config] LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY.');
+  process.exit(1);
+}
+
+// SESSION_SECRET's presence is covered by REQUIRED above; a present-but-short secret
+// still passes that check, so its minimum length (a security property, not a presence
+// check) is enforced separately here.
+if (config.auth.sessionSecret.length < 32) {
+  console.error('[config] SESSION_SECRET must be at least 32 characters.');
   process.exit(1);
 }

@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { config } from '../config/index.js';
 import { ingestDocumentJob } from './ingestDocument.js';
+import { recordCompletion } from '../telemetry/throughput.js';
 
 // Amended during Phase 2 implementation: verified live that a single shared connection
 // with `maxRetriesPerRequest: null` — required for the Worker's blocking commands, or it
@@ -54,6 +55,7 @@ function buildWorker() {
   });
   w.on('completed', (job) => {
     console.log(`[ingest] job ${job.id} completed`);
+    void recordCompletion();
   });
   // Without a listener, an 'error' event on any Node EventEmitter (BullMQ's Worker
   // included) throws and crashes the process — this is Node's default behavior for the

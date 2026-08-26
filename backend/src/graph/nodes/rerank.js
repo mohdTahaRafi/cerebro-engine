@@ -22,6 +22,7 @@ export async function rerankNode(state) {
     const corpusEmpty = (await vectorStore.countPoints(state.tenant)) === 0;
     return {
       sources: [],
+      allCandidates: [],
       emptyReason: corpusEmpty ? 'empty_corpus' : 'no_relevant_matches',
       timings: { candidatesAfterFloor: 0, rerankSkipped: false },
     };
@@ -37,8 +38,32 @@ export async function rerankNode(state) {
   // /api/search reports.
   const sources = filtered.map((r, i) => toPublicResult({ ...r, finalRank: i + 1 }));
 
+  // Phase 7 §2.2, task 7.3: the FULL pre-floor candidate set, kept on state and normalized
+  // to Trace.js's CandidateSchema shape (kind/text, not search.js's internal
+  // sourceKind/ocrText split) — a trace-only projection, independent of `sources` above.
+  // `survivorRank` reuses the exact 1-based position `sources` was just assigned, so a
+  // candidate's finalRank here is identical to its finalRank in the live SSE `sources`
+  // frame, not a second, possibly-drifting computation of the same thing.
+  const survivorRank = new Map(filtered.map((r, i) => [r.pointId, i + 1]));
+  const allCandidates = ranked.map((r) => ({
+    pointId: r.pointId,
+    kind: r.sourceKind === 'page' ? 'page' : 'text',
+    documentId: r.documentId,
+    fileName: r.fileName,
+    page: r.page ?? null,
+    headingPath: r.headingPath ?? null,
+    text: r.sourceKind === 'page' ? r.ocrText : r.text,
+    branch: r.sourceKind === 'page' ? 'colpali' : (r.branch ?? null),
+    fusionRank: r.fusionRank ?? null,
+    finalRank: survivorRank.get(r.pointId) ?? null,
+    score: r.relevanceScore,
+    belowFloor: !survivorRank.has(r.pointId),
+    absorbedChunks: r.absorbedChunks ?? undefined,
+  }));
+
   return {
     sources,
+    allCandidates,
     emptyReason: sources.length === 0 ? 'no_relevant_matches' : null,
     timings: {
       rerankMs: Math.round(performance.now() - t0),

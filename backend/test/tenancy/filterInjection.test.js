@@ -45,12 +45,18 @@ const GUARDED_FUNCTIONS = [
   ['deleteByContext', (t) => vectorStore.deleteByContext(t)],
   ['deletePagesByContext', (t) => vectorStore.deletePagesByContext(t)],
   ['countByDocument', (t) => vectorStore.countByDocument(t, 'doc-1')],
+  // Phase 7 §4.3: the query beacon's real nearest-neighbor lookup.
+  ['nearestDense', (t) => vectorStore.nearestDense(t, [], 12)],
 ];
 
 // Deliberately NOT tenant-guarded, and deliberately excluded from GUARDED_FUNCTIONS —
 // see each one's own header comment in vectorStore.js for why.
 const UNGUARDED_ALLOWLIST = new Set([
   'client', 'ping', 'ensureCollections', 'countAllPoints', 'countAllPagePoints',
+  // Phase 7 §4.6: retrieve-by-id has no tenant to filter on (Qdrant's retrieve API takes
+  // no filter) — routes/vectors.js checks ownership on the RETURNED payload instead, one
+  // layer up. See retrieveById's own header comment in vectorStore.js.
+  'retrieveById',
 ]);
 
 // task 6.19's four malformed tenants.

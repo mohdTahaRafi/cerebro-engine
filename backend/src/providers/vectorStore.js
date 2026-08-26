@@ -521,3 +521,40 @@ export async function countAllPagePoints() {
   const { count } = await client().count(config.qdrant.pagesCollection, { exact: true });
   return count;
 }
+
+// ── Phase 7 §4.3: the beacon's real nearest-neighbor query ─────────────────────────────
+//
+// A plain dense ANN query against `cerebro_chunks`, tenant-scoped like every other query
+// in this module — the query beacon must never surface a neighbor from a different
+// tenant's data, even transiently, even to compute a coordinate that is discarded. Kept
+// separate from hybridQuery (which fuses dense+sparse) because the beacon's placement is
+// deliberately dense-only cosine similarity in the SAME space the projection's UMAP fit
+// ran over (dense vectors) — mixing in sparse rank would decouple "nearest in embedding
+// space" from "nearest in the plotted space," which is the one guarantee projectQuery
+// makes about the beacon.
+// retrieveById — a single point, by id, WITH its dense vector (phase 7 §4.6's node
+// inspector needs the full text plus a real vector norm). Deliberately takes no tenant
+// filter: Qdrant's retrieve-by-id API has no `filter` parameter to intersect with an id
+// list, so ownership is checked by the caller (routes/vectors.js) comparing the returned
+// payload's `userId` against `req.user._id` and answering 404 on a mismatch — the same
+// "never confirm a foreign id exists" rule requireContext.js applies, just enforced one
+// layer up because Qdrant's own API can't enforce it here.
+export async function retrieveById(pointId) {
+  const points = await qdrantOpBreaker.fire(() => client().retrieve(config.qdrant.chunksCollection, {
+    ids: [pointId], with_payload: true, with_vector: true,
+  }));
+  const p = points[0];
+  if (!p) return null;
+  return { pointId: String(p.id), vector: p.vector?.dense ?? null, payload: p.payload };
+}
+
+export async function nearestDense(tenant, vector, k) {
+  assertTenant(tenant, 'nearestDense');
+  const res = await qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
+    query: vector, using: 'dense', limit: k,
+    filter: { must: tenantConditions(tenant) },
+    params: { hnsw_ef: HNSW_EF_SEARCH },
+    with_payload: true, with_vector: false,
+  }));
+  return res.points.map((p) => ({ pointId: String(p.id), score: p.score, ...p.payload }));
+}

@@ -11,7 +11,7 @@ import { establishSession, destroySession, destroyAllSessions } from '../../auth
 import { requireAuth } from '../middleware/requireAuth.js';
 import * as mailer from '../../notify/email.js';
 import * as sms from '../../notify/sms.js';
-import { PipelineError } from '../../models/PipelineError.js';
+import { recordPipelineError } from '../../telemetry/pipelineError.js';
 
 const router = express.Router();
 
@@ -82,7 +82,7 @@ router.post('/api/auth/signup', async (req, res, next) => {
     if (existing) {
       await burnHashTime();   // §8: comparable latency to the real-signup branch below
       mailer.sendSignupCollision({ to: normalizedEmail }).catch(async (err) => {
-        await PipelineError.create({ kind: 'notify', message: err.message, stack: err.stack ?? null, retryable: true });
+        await recordPipelineError('notify', err, { retryable: true });
       });
       return res.status(202).json({ ok: true });
     }

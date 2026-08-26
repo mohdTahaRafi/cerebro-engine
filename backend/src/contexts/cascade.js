@@ -9,7 +9,9 @@ import { Context } from '../models/Context.js';
 import { Document } from '../models/Document.js';
 import { Conversation } from '../models/Conversation.js';
 import { Message } from '../models/Message.js';
-import { PipelineError } from '../models/PipelineError.js';
+import { Trace } from '../models/Trace.js';
+import { Projection } from '../models/Projection.js';
+import { recordPipelineError } from '../telemetry/pipelineError.js';
 import * as vectorStore from '../providers/vectorStore.js';
 import * as storage from '../providers/storage.js';
 
@@ -45,9 +47,12 @@ export async function cascadeDeleteContext(contextId, userId) {
   await Message.deleteMany({ conversationId: { $in: threadIds } });
   await Conversation.deleteMany({ userId, contextId });
 
-  // 9. Traces — Phase 7 introduces the Trace model; no-op until then (nothing to match).
-  //    Left as an explicit step, not omitted, so the cascade's step count and ordering
-  //    stay stable across the phase boundary rather than needing a reshuffle later.
+  // 9. Traces and the cached vector projection — a context that no longer exists must
+  //    leave no orphaned Trace rows (the 30-day TTL would eventually reclaim them, but a
+  //    trace whose contextId resolves to nothing is a dangling reference until then) and
+  //    no stale Projection row, which nothing else would ever collect.
+  await Trace.deleteMany({ userId, contextId });
+  await Projection.deleteOne({ contextId });
 
   // 10. The context row itself, last.
   await Context.deleteOne({ _id: contextId });
@@ -60,12 +65,7 @@ export async function cascadeDeleteContext(contextId, userId) {
 // future queries, citing a document that no longer exists) and a `pipeline_errors` row
 // records the failure so the UI's retry button has something to show.
 export async function recordCascadeFailure(contextId, userId, err) {
-  await PipelineError.create({
-    kind: 'queue',
-    message: `Context deletion failed: ${err.message}`,
-    stack: err.stack ?? null,
-    retryable: true,
-    userId,
-    contextId,
+  await recordPipelineError('queue', { message: `Context deletion failed: ${err.message}`, stack: err.stack }, {
+    userId, contextId, retryable: true,
   });
 }

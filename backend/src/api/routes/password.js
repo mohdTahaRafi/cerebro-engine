@@ -14,7 +14,7 @@ import { maskEmail, maskPhone } from '../../auth/mask.js';
 import { destroyAllSessions } from '../../auth/sessionLifecycle.js';
 import * as mailer from '../../notify/email.js';
 import * as sms from '../../notify/sms.js';
-import { PipelineError } from '../../models/PipelineError.js';
+import { recordPipelineError } from '../../telemetry/pipelineError.js';
 
 const router = express.Router();
 
@@ -87,13 +87,7 @@ router.post('/api/auth/forgot-password', async (req, res, next) => {
         // §5.4: delete the record (not the cooldown key) so the next request isn't
         // blocked by a code that was never delivered, but the retry is still paced.
         await discardOtp(user._id);
-        await PipelineError.create({
-          kind: 'notify',
-          message: err.message,
-          stack: err.stack ?? null,
-          retryable: true,
-          userId: user._id,
-        });
+        await recordPipelineError('notify', err, { userId: user._id, retryable: true });
       }
     }
 

@@ -13,6 +13,7 @@ import { ingestQueue, JOB_OPTS } from '../../ingestion/queue.js';
 import * as vectorStore from '../../providers/vectorStore.js';
 import * as storage from '../../providers/storage.js';
 import { recomputeContextCounters } from '../../contexts/counters.js';
+import { enqueueProjectionRebuild } from '../../projection/worker.js';
 
 const router = express.Router();
 
@@ -86,6 +87,9 @@ router.delete('/api/documents/:id', async (req, res, next) => {
     );
     await doc.deleteOne();
     await recomputeContextCounters(doc.contextId);
+    // Phase 7 §4.5: a document delete invalidates the cached projection exactly like an
+    // ingest completion does — the corpus it was fitted over just changed.
+    await enqueueProjectionRebuild(tenant);
 
     res.json({ deleted: true, documentId: doc._id, deletedPoints, deletedPagePoints });
   } catch (err) {

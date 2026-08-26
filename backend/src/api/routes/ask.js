@@ -111,7 +111,6 @@ router.post('/api/ask', requireContext, async (req, res) => {
       { configurable: { emit }, signal: abort.signal, runName: 'ragGraph', runId },
     );
 
-    await persistTurn(conversationId, req.tenant.userId, query, final);
     // totalMs is computed here, from the route's own request-entry timestamp, rather than
     // read off any single node's internal timer (phase 6 §2.1) — no individual node's
     // timer spans condense+retrieve+rerank+generate, so only the route itself can measure
@@ -125,10 +124,17 @@ router.post('/api/ask', requireContext, async (req, res) => {
       requestT0,
     );
     recordPipelineTelemetry(telemetry);
+
+    // Phase 7 §2.4: the trace is written before the `telemetry` frame is emitted, so
+    // `traceId` is real (resolvable by GET /api/traces/:id) by the time the client
+    // receives it — ordering matters, not just presence.
+    const { traceId } = await persistTurn(conversationId, req.tenant, query, final, { telemetry, runId });
+
     emit('telemetry', {
       threadId: conversationId,
       telemetry,
       runId,
+      traceId,
       langsmith: config.tracing.enabled
         ? { orgId: config.tracing.orgId, project: config.tracing.project }
         : null,
@@ -152,7 +158,7 @@ router.post('/api/ask', requireContext, async (req, res) => {
 //   threadId   { threadId }                                       once, first — before the graph even runs
 //   sources    { sources: [...] }                                  once, before the first token
 //   token      { token: "…" }                                      per generated token
-//   telemetry  { telemetry: PipelineTelemetry, runId, langsmith }  once, after generation
+//   telemetry  { telemetry: PipelineTelemetry, runId, traceId, langsmith }  once, after generation
 //   error      { error: "…" }                                      on failure, terminal
 //   [DONE]     raw sentinel                                         always last on success
 //

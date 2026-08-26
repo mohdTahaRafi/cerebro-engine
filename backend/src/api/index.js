@@ -19,12 +19,16 @@ import pagesRouter from './routes/pages.js';
 import askRouter from './routes/ask.js';
 import threadsRouter from './routes/threads.js';
 import metricsRouter from './routes/metrics.js';
+import tracesRouter from './routes/traces.js';
+import vectorsRouter from './routes/vectors.js';
+import adminRouter from './routes/admin.js';
 import { sessionMiddleware } from '../auth/session.js';
 import { passport } from '../auth/passport.js';
 import authRouter from './routes/auth.js';
 import passwordRouter from './routes/password.js';
 import { startWorker } from '../ingestion/queue.js';
 import { startContextDeleteWorker } from '../contexts/queue.js';
+import { startProjectionWorker } from '../projection/worker.js';
 import { registerGracefulShutdown } from '../shutdown.js';
 
 const app = express();
@@ -78,8 +82,11 @@ app.use((req, res, next) => {
 // Phase 6 §5.1: requireAuth on every route named there — mounted BEFORE the rate
 // limiters below specifically so rateLimit.js's identity keyGenerator sees `req.user`
 // already populated (§5.5). `/health`, `/api/health`, `/metrics`, and `/api/auth/*` stay
-// public — none of their prefixes appear here.
-for (const prefix of ['/api/documents', '/api/search', '/api/ask', '/api/threads', '/api/pages', '/api/contexts']) {
+// public — none of their prefixes appear here. Phase 7 adds `/api/traces` and
+// `/api/vectors`. `/api/admin` is deliberately absent: admin.js's own requireAdmin
+// already wraps requireAuth (middleware/requireAdmin.js), so adding it here would just
+// run the same session lookup twice on every admin request.
+for (const prefix of ['/api/documents', '/api/search', '/api/ask', '/api/threads', '/api/pages', '/api/contexts', '/api/traces', '/api/vectors']) {
   app.use(prefix, requireAuth);
 }
 
@@ -125,10 +132,15 @@ mongoose.connect(config.mongo.uri)
                 // queue — its own queue means a 20s cascade never occupies an ingest slot.
                 const contextDeleteWorker = startContextDeleteWorker();
                 console.log('[CEREBRO] Context-delete worker started (concurrency 1)');
+                // Phase 7 §4.5: a third, separate BullMQ worker for the projection
+                // queue — a UMAP fit is CPU-bound and must not occupy an ingest slot
+                // (same reasoning the context-delete queue is already split out for).
+                const projectionWorker = startProjectionWorker();
+                console.log('[CEREBRO] Projection worker started (concurrency 1)');
                 // Phase 6 §6.2, §11: SIGTERM drains in-flight SSE streams, closes these
                 // same worker instances (not fresh ones — closing a worker BullMQ never
                 // started would be a no-op that only looks like a clean shutdown), then exits.
-                registerGracefulShutdown(server, { workers: [worker, contextDeleteWorker] });
+                registerGracefulShutdown(server, { workers: [worker, contextDeleteWorker, projectionWorker] });
             }, 100);
         });
 
@@ -188,6 +200,13 @@ app.use(pagesRouter);
 // /api/ask handler below (removed here — same path, new SSE envelope, thread-aware).
 app.use(askRouter);
 app.use(threadsRouter);
+
+// Phase 7: the trace list/detail routes (the pipeline's own recorded telemetry), the
+// vector-space projection/beacon/node routes, and the two admin-only operational
+// endpoints — this is what makes the Phase 4 consoles real instead of mock-fed.
+app.use(tracesRouter);
+app.use(vectorsRouter);
+app.use(adminRouter);
 
 // Phase 6 §7.2: Prometheus exposition — mounted like any other router, but deliberately
 // absent from the Caddyfile's route table (§8.2), which is what actually keeps it off the

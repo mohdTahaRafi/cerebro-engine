@@ -17,6 +17,20 @@ const DocumentSchema = new mongoose.Schema({
     index: true,
   },
   error:        { type: String, default: null },        // human-readable failure reason
+  // Phase 7 §5.3: the real lifecycle stage, written by ingestDocument.js at the same six
+  // points that already call updateProgress(). Retires the frontend's client-side
+  // status+progress derivation (frontend/src/app/components/documents/stage.ts, deleted
+  // this phase) — the enum matches that interim mapping's five PRD-named stages exactly,
+  // so the client change is "read doc.stage" with no shape change.
+  stage: {
+    type: String,
+    enum: ['queued', 'parsing', 'chunking', 'embedding', 'ready', 'failed'],
+    default: 'queued',
+  },
+  // Populated only at the progress-45 write, when visual pages are present — e.g. "OCR
+  // and page embedding, 12 pages" — built server-side from visualPageCount so the client
+  // never invents wording the backend hasn't confirmed.
+  stageDetail:  { type: String, default: null },
   pageCount:    { type: Number, default: 0 },
   textPageCount:   { type: Number, default: 0 },        // populated Phase 4
   visualPageCount: { type: Number, default: 0 },        // populated Phase 4

@@ -5,11 +5,11 @@
 // Phase 6 §5.4, §9: the backend's `Document` model now carries a real `contextId`
 // (backend/src/models/Document.js) and every route is nested under
 // `/api/contexts/:contextId/...` (backend/src/api/routes/contexts.js) — the interim
-// client-side `contextId` mapping (mock/fixtures/docContexts.ts) is gone; `stage` is
-// still derived on the client from status + progress until Phase 7 adds a real field.
+// client-side `contextId` mapping (mock/fixtures/docContexts.ts) is gone. Phase 7 §5.3
+// retires the client-side `stage` derivation too — `stage`/`stageDetail` are now real
+// fields the backend writes at ingest time; this module reads them straight through.
 import { request } from '../client';
 import type { DocumentRecord, DocumentStatus } from '../contracts';
-import { deriveStage } from '../../app/components/documents/stage';
 
 export interface IngestionResponse {
   documentId: string;
@@ -44,27 +44,27 @@ const POLL_TIMEOUT_MS = 5 * 60_000;
 // (one request, per §5.4's list-level polling) rather than paginated against the server.
 const LIST_LIMIT = 200;
 
-/** The shape a Mongoose `Document` actually serializes to over `res.json()` — `_id`, and
- *  a REAL `contextId` as of Phase 6 (backend/src/models/Document.js), unlike Phase 2's
- *  interim client-side mapping. Still no `stage` (phase_2 §5.2). */
+/** The shape a Mongoose `Document` actually serializes to over `res.json()` — `_id`, a
+ *  REAL `contextId` as of Phase 6 (backend/src/models/Document.js), and a REAL
+ *  `stage`/`stageDetail` as of Phase 7 (§5.3). */
 interface RawDocument {
   _id: string; contextId: string; fileName: string; mimeType: string; sizeBytes: number;
-  status: DocumentStatus; progress: number; error: string | null;
+  status: DocumentStatus; stage: DocumentRecord['stage']; stageDetail: string | null; progress: number;
+  error: string | null;
   chunkCount: number; pageCount: number; textPageCount: number; visualPageCount: number;
   warnings: string[]; createdAt: string; duplicateOf: string | null;
 }
 
 function normalize(raw: RawDocument, fileNameById: Map<string, string>): DocumentRecord {
-  const withoutStage = {
+  return {
     id: raw._id, contextId: raw.contextId,
     fileName: raw.fileName, mimeType: raw.mimeType, sizeBytes: raw.sizeBytes,
-    status: raw.status, progress: raw.progress,
+    status: raw.status, stage: raw.stage, stageDetail: raw.stageDetail, progress: raw.progress,
     chunkCount: raw.chunkCount, pageCount: raw.pageCount,
     textPageCount: raw.textPageCount, visualPageCount: raw.visualPageCount,
     error: raw.error, warnings: raw.warnings ?? [], createdAt: raw.createdAt,
     duplicateOfFileName: raw.duplicateOf ? fileNameById.get(raw.duplicateOf) ?? null : null,
   };
-  return { ...withoutStage, stage: deriveStage(withoutStage) };
 }
 
 export const documents = {

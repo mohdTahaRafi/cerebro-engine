@@ -8,7 +8,8 @@
     "install": "node-gyp rebuild",
     "start": "node src/api/index.js",
     "dev": "node --watch src/api/index.js",
-    "test": "npm run test:breaker && npm run test:encode-query && npm run test:ingestion && npm run test:vision && npm run test:graph && npm run test:cpp-bridge && npm run test:telemetry && npm run test:migration && npm run test:api && npm run test:auth && npm run test:tenancy",
+    "test": "npm run test:breaker && npm run test:encode-query && npm run test:ingestion && npm run test:vision && npm run test:graph && npm run test:cpp-bridge && npm run test:telemetry && npm run test:migration && npm run test:api && npm run test:auth && npm run test:tenancy && npm run test:projection",
+    "test:projection": "node test/projection/fit.test.js && node test/projection/transform.test.js",
     "test:auth": "node test/auth/user.test.js && node test/auth/password.test.js && node test/auth/otp.test.js && node test/auth/linking.test.js && node test/auth/session.test.js",
     "test:tenancy": "node test/tenancy/filterInjection.test.js && QDRANT_CHUNKS_COLLECTION=cerebro_chunks_test QDRANT_PAGES_COLLECTION=cerebro_pages_test node test/tenancy/isolation.test.js",
     "test:telemetry": "node test/telemetry/pipelineTelemetry.test.js",
@@ -73,6 +74,7 @@
     "rate-limit-redis": "^4.2.2",
     "redis": "^6.2.1",
     "twilio": "^6.1.0",
+    "umap-js": "^1.4.0",
     "uuid": "^11.1.1",
     "xlsx": "^0.18.5"
   },

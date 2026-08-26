@@ -14,6 +14,8 @@ import { recordUsage } from '../telemetry/usage.js';
 import { ingestJobDuration } from '../telemetry/metrics.js';
 import { config } from '../config/index.js';
 import { recomputeContextCounters } from '../contexts/counters.js';
+import { recordPipelineError } from '../telemetry/pipelineError.js';
+import { enqueueProjectionRebuild } from '../projection/worker.js';
 
 // Keeps BullMQ's own job.progress (internal queue bookkeeping) and the Document row's
 // `progress` field (what GET /api/documents/:id and :id/status actually serve to the
@@ -21,8 +23,21 @@ import { recomputeContextCounters } from '../contexts/counters.js';
 // boundaries, which never touched doc.progress — invisible to a client polling the
 // document, and not what phase 4's milestone walk (§9: "climbs past 15%... sits at
 // 45-75%...") requires. Every band boundary in this job goes through this helper instead.
-async function updateProgress(doc, job, pct) {
-  await Promise.all([doc.updateOne({ progress: pct }), job.updateProgress(pct)]);
+//
+// Phase 7 §5.3: `stage`/`stageDetail` are written at the same six calls — the real
+// backend truth that retires the frontend's client-side status+progress derivation.
+async function updateProgress(doc, job, pct, stage, stageDetail = null) {
+  await Promise.all([doc.updateOne({ progress: pct, stage, stageDetail }), job.updateProgress(pct)]);
+}
+
+// Phase 7 §5.3, §5.2: ingestDocument.js's catch block is one of the writers listed for
+// recordPipelineError — 'parse' for the permanent, pre-Qdrant failure modes classify()
+// already recognizes (bad container, no extractable content, unsupported type); 'embed'
+// for everything else (a transient provider/network failure during embed/upsert, the
+// stage most of this job's wall-clock time is actually spent in).
+const PARSE_CODES = new Set(['UNSUPPORTED_FILE_TYPE', 'CORRUPT_DOCUMENT', 'NO_EXTRACTABLE_CONTENT']);
+function pipelineErrorKind(err) {
+  return PARSE_CODES.has(err.code) ? 'parse' : 'embed';
 }
 
 // architecture §6.2: a vision-service outage degrades the document rather than failing
@@ -97,7 +112,7 @@ export async function ingestDocumentJob(job) {
   const tenant = { userId: String(doc.userId), contextId: String(doc.contextId) };
 
   try {
-    await doc.updateOne({ status: 'processing', progress: 5, error: null, warnings: [] });
+    await doc.updateOne({ status: 'processing', progress: 5, stage: 'parsing', stageDetail: null, error: null, warnings: [] });
 
     const ext = path.extname(doc.fileName).toLowerCase();
     const base = {
@@ -115,7 +130,7 @@ export async function ingestDocumentJob(job) {
         visualPageCount: routing.visualPages.length,
       });
     }
-    await updateProgress(doc, job, 15);
+    await updateProgress(doc, job, 15, 'parsing');
 
     // 2. Text path — unchanged from Phase 2, restricted to text pages ── 15% → 45%
     // Skipped entirely when classification found zero text pages: parsing pages that
@@ -129,7 +144,13 @@ export async function ingestDocumentJob(job) {
     const textPages = routing.textPages
       ? parsed.filter((p) => routing.textPages.includes(p.metadata.page))
       : parsed;
-    await updateProgress(doc, job, 45);
+    // Phase 7 §5.3: the sub-label the milestone walks literally ("OCR and page embedding,
+    // 12 pages") — built here, server-side, from the real visualPageCount classification
+    // just found, so the client renders it verbatim rather than inventing wording.
+    const visualStageDetail = routing.visualPages.length > 0
+      ? `OCR and page embedding, ${routing.visualPages.length} page${routing.visualPages.length === 1 ? '' : 's'}`
+      : null;
+    await updateProgress(doc, job, 45, 'parsing', visualStageDetail);
 
     // 3. Visual path ──────────────────────────────────────── 45% → 75%
     let visualResults = [];
@@ -137,7 +158,7 @@ export async function ingestDocumentJob(job) {
       visualResults = await embedVisualPages(doc, routing.visualPages, job);
       await syncPageImagesToStorage(visualResults);
     }
-    await updateProgress(doc, job, 75);
+    await updateProgress(doc, job, 75, 'chunking');
 
     // 4. Chunk text pages + OCR text together ──────────────── 75% → 85%
     const chunks = [
@@ -148,7 +169,7 @@ export async function ingestDocumentJob(job) {
       ),
     ];
     if (!routing.textPages) await doc.updateOne({ pageCount: parsed.length });   // non-PDF: unset by step 1
-    await updateProgress(doc, job, 85);
+    await updateProgress(doc, job, 85, 'embedding');
 
     // The no-content reversal (§6.2): a fully scanned PDF has zero extractable text *and*
     // is perfectly ingestable via the visual path, so "no content" must mean neither path
@@ -179,7 +200,7 @@ export async function ingestDocumentJob(job) {
       totalTokens = tokens;
       await vectorStore.upsertChunks(tenant, chunks, dense, sparse);
     }
-    await updateProgress(doc, job, 95);
+    await updateProgress(doc, job, 95, 'embedding');
 
     // 6. Upsert pages ─────────────────────────────────────────── 95% → 100%
     // Only pages that actually carry a multivector. With COLPALI_ENABLED=false the vision
@@ -193,11 +214,14 @@ export async function ingestDocumentJob(job) {
       await vectorStore.upsertPages(tenant, embeddablePages, doc._id.toString(), doc.fileName);
     }
 
-    await doc.updateOne({ status: 'ready', progress: 100, chunkCount: chunks.length, error: null });
+    await doc.updateOne({ status: 'ready', progress: 100, stage: 'ready', stageDetail: null, chunkCount: chunks.length, error: null });
     if (totalTokens > 0) {
       await recordUsage({ provider: 'cohere', operation: 'embed', inputTokens: totalTokens, documentId });
     }
     await recomputeContextCounters(doc.contextId);
+    // Phase 7 §4.5: enqueued on ingest completion, not on every chunk upsert — one fit
+    // per document, deduplicated per context by the queue's own jobId.
+    await enqueueProjectionRebuild(tenant);
     ingestJobDuration.observe({ outcome: 'success' }, (performance.now() - jobT0) / 1000);
   } catch (err) {
     // Atomicity (NFR-REL-03): remove every trace before recording the failure, so a
@@ -215,7 +239,17 @@ export async function ingestDocumentJob(job) {
       console.warn(`[ingest] rollback for ${documentId} failed (will retry on next attempt if transient):`, rollbackErr.message);
     }
     await Document.findByIdAndUpdate(documentId, {
-      status: 'failed', progress: 0, error: err.message, chunkCount: 0,
+      status: 'failed', progress: 0, stage: 'failed', stageDetail: null, error: err.message, chunkCount: 0,
+    });
+    // Phase 7 §5.2: ingestDocument.js's own catch is one of the named recordPipelineError
+    // writers. `kind` follows classify()'s own permanent/transient split — a permanent
+    // failure (bad container, no extractable content, unsupported type) is a 'parse'
+    // problem; everything else is 'embed', the stage most of this job's wall-clock time
+    // is spent in. Best-effort: the pipeline_errors write is a diagnostic, and its own
+    // failure must not mask the real ingest error being thrown below.
+    await recordPipelineError(pipelineErrorKind(err), err, {
+      userId: tenant.userId, contextId: tenant.contextId, documentId, fileName: doc.fileName,
+      retryable: !PARSE_CODES.has(err.code),
     });
     // Recorded per attempt, not per document: a transient failure BullMQ later retries
     // successfully still produces one real 'failure' sample for how long that attempt ran

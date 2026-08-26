@@ -6,6 +6,10 @@ import * as llm from '../../providers/llm.js';
 import * as storage from '../../providers/storage.js';
 import { config as appConfig } from '../../config/index.js';
 import { SYSTEM_PROMPT } from '../prompts.js';
+// Phase 7 §2.2: the same cl100k_base tokenizer chunker.js already uses for chunk sizing —
+// reused here for TracePromptBlock.approxTokens rather than a second, looser heuristic
+// (chars/4) that would disagree with the number the ingestion side already computes.
+import { tokenLength } from '../../ingestion/chunker.js';
 
 export const MAX_ATTACHED_IMAGES = 3;
 
@@ -43,10 +47,18 @@ function toPublicSource(s) {
 // Phase 5 §7.2, §7.3. `visionCapable` gates image attachment: when the configured model
 // can't read images (an Ollama text-only model, an explicit FR-GEN edge case), sources
 // are still cited from their OCR text — only the image content blocks are skipped.
+//
+// Phase 7 §2.2, task 7.2, 7.4: builds `promptBlocks` alongside the real LangChain message
+// content, in the exact order the model receives them — a `system` block for
+// SYSTEM_PROMPT (added by the caller), then this function's own `user` blocks. The image
+// block's `content` is `s.imageUri` (the served `/api/pages/<id>/<n>.jpg` route), never
+// the base64 data URI the real content array carries — the trace stores what a human can
+// open in a browser, not a ~350 KB unreadable string (Trace.js §2.1's own comment).
 async function buildUserMessage(state, visionCapable) {
   const query = state.condensedQuery ?? state.query;
   const content = [];
   const textBlocks = [];
+  const promptBlocks = [];
 
   // Only the highest-scoring pages get images. Each costs ~1,600 tokens; attaching
   // eight would triple the prompt for pages the model has already been given as text.
@@ -66,6 +78,8 @@ async function buildUserMessage(state, visionCapable) {
         const b64 = await storage.readBase64(s.imageUri);
         content.push({ type: 'text', text: `Image for source [${n}]:` });
         content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } });
+        promptBlocks.push({ role: 'user', kind: 'text', content: `Image for source [${n}]:`, approxTokens: null });
+        promptBlocks.push({ role: 'user', kind: 'image', content: s.imageUri, approxTokens: null });
       } catch (err) {
         // A missing/unreadable page image degrades to text-only for that one source
         // rather than failing the whole answer — the OCR text is still in textBlocks.
@@ -74,11 +88,13 @@ async function buildUserMessage(state, visionCapable) {
     }
   }
 
-  content.unshift({
-    type: 'text',
-    text: `<sources>\n${textBlocks.join('\n\n')}\n</sources>\n\nQuestion: ${query}`,
-  });
-  return new HumanMessage({ content });
+  const sourcesText = `<sources>\n${textBlocks.join('\n\n')}\n</sources>\n\nQuestion: ${query}`;
+  content.unshift({ type: 'text', text: sourcesText });
+  // The sources+question block goes first in `promptBlocks` too, matching `content`'s
+  // own unshift — the model reads its instructions and the evidence before any image.
+  promptBlocks.unshift({ role: 'user', kind: 'text', content: sourcesText, approxTokens: tokenLength(sourcesText) });
+
+  return { message: new HumanMessage({ content }), promptBlocks };
 }
 
 export async function generateNode(state, config) {
@@ -94,12 +110,22 @@ export async function generateNode(state, config) {
 
   emit('sources', { sources: state.sources.map(toPublicSource) });
 
+  // Phase 7 §2.2: the trace's Prompt tab needs the exact blocks the model received, so
+  // this is built once and reused whether generation succeeds or fails — a failed call
+  // still assembled and sent a real prompt, and the trace should say so.
+  const { message: userMessage, promptBlocks: userBlocks } = await buildUserMessage(state, visionCapable);
+  const promptBlocks = [
+    { role: 'system', kind: 'text', content: SYSTEM_PROMPT, approxTokens: tokenLength(SYSTEM_PROMPT) },
+    ...userBlocks,
+  ];
+  const modelName = appConfig.llm.provider === 'anthropic' ? appConfig.llm.anthropic.model : appConfig.llm.ollama.model;
+
   let answer = '', firstTokenMs = null, usage = null;
   try {
     const stream = await model.stream([
       new SystemMessage(SYSTEM_PROMPT),
       ...state.history.map(toLangChainMessage),
-      await buildUserMessage(state, visionCapable),
+      userMessage,
     ], { signal: config.signal });   // forwarded so a client disconnect (route's abort()
                                       // controller) actually stops the provider call, not
                                       // just the graph's bookkeeping around it (§9).
@@ -117,6 +143,7 @@ export async function generateNode(state, config) {
     emit('error', { error: 'Answer generation failed. Your search results are still available.' });
     return {
       answer,
+      promptBlocks,
       // generateStartAt (phase 6 §2.2) on the failure path too: a generation that errored
       // partway still consumed real wall-clock time, and a waterfall that omitted its bar
       // would leave unexplained dead space rather than showing where the time went.
@@ -129,6 +156,14 @@ export async function generateNode(state, config) {
 
   return {
     answer,
+    promptBlocks,
+    // Phase 7 §2.2: forwarded onto state so persistTurn can build Trace.tokens without a
+    // second read of usage_metadata — 0/0 (never a missing row) mirrors
+    // recordGenerationUsage's own "undercounted is still evidence a call happened" rule.
+    usage: {
+      inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0,
+      provider: appConfig.llm.provider, model: modelName,
+    },
     timings: { firstTokenMs, generateMs: Math.round(performance.now() - t0), generateStartAt: t0 },
     warnings,
   };

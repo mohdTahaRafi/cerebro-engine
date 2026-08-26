@@ -1,8 +1,7 @@
-// phase_4 §5.1 — waiting/active/failed/completed are real (`/api/health`'s `queue`);
-// throughput, worker concurrency, and oldest-waiting age are mocked (`/api/admin/queue`).
-// Rendered as one card with the mocked rows carrying their own <MockBadge> rather than
-// merging the two into one indistinguishable block.
-import { MockBadge } from '../design/MockBadge';
+// phase_4 §5.1 — waiting/active/failed/completed are real (`/api/health`'s `queue`).
+// Phase 7 §5.1 makes throughput/worker concurrency/oldest-waiting-age real too
+// (`/api/admin/queue`, backed by the Redis sorted set backend/src/telemetry/throughput.js
+// maintains) — no longer a <MockBadge> row.
 import type { QueueStats } from '../../../api/contracts';
 
 interface RealQueue { waiting: number; active: number; failed: number; completed: number }
@@ -22,9 +21,8 @@ export function QueuePanel({ queue, stats }: { queue: RealQueue | null; stats: Q
         <p className="text-xs italic text-graphite">unavailable</p>
       )}
 
-      <div className="mt-1 flex items-center gap-1.5 border-t border-line-subtle pt-1.5">
+      <div className="mt-1 border-t border-line-subtle pt-1.5">
         <span className="text-[10px] font-medium uppercase tracking-wide text-graphite">Throughput</span>
-        <MockBadge />
       </div>
       {stats ? (
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">

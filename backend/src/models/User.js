@@ -34,8 +34,15 @@ const UserSchema = new mongoose.Schema({
   name:          { type: String, default: null, maxlength: 120 },
   avatarUrl:     { type: String, default: null },
 
-  // E.164, e.g. +14155550137. Only present when the user opted into SMS OTP.
-  phone:         { type: String, default: null },
+  // E.164, e.g. +14155550137. Only present when the user opted into SMS OTP. NO
+  // `default: null` — Mongoose writes an explicit default into the document at creation,
+  // and the sparse unique index below only excludes documents where the field is truly
+  // ABSENT from the BSON, not present-with-value-null. `default: null` here made every
+  // phone-less user collide on the same indexed null, so the second signup with no phone
+  // failed with a duplicate-key error on `phone_1` — verified live during this phase's
+  // implementation. Leaving no default keeps the path genuinely unset until a user
+  // supplies one.
+  phone:         { type: String },
   phoneVerified: { type: Boolean, default: false },
 
   role:          { type: String, enum: ['user', 'admin'], default: 'user', index: true },
@@ -50,9 +57,21 @@ const UserSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // A single provider account can back exactly one Cerebro user. Sparse is wrong here —
-// every identity has both fields — but the index must be on the array path so Mongo
-// indexes each subdocument.
-UserSchema.index({ 'identities.provider': 1, 'identities.providerId': 1 }, { unique: true });
+// every identity SUBDOCUMENT has both fields — but the index must be on the array path
+// so Mongo indexes each subdocument. `partialFilterExpression` guards a different case
+// sparse wouldn't catch: no production code path ever persists a User with a genuinely
+// EMPTY `identities` array (signup always pushes a `local` identity before saving;
+// linking.js's two "create a new user" branches both include one too), but if it ever
+// happened, Mongo indexes an empty array's dotted path as a single {provider: null,
+// providerId: null} entry — a NON-sparse unique index then lets only the FIRST such user
+// exist at all, and every second one fails to save with a duplicate-key error on this
+// index. Verified live while writing this phase's tests. The filter restricts the index
+// to documents that actually have at least one identity, matching what "a single
+// provider account backs exactly one user" is actually supposed to mean.
+UserSchema.index(
+  { 'identities.provider': 1, 'identities.providerId': 1 },
+  { unique: true, partialFilterExpression: { 'identities.0': { $exists: true } } },
+);
 UserSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
 export const User = mongoose.model('User', UserSchema);

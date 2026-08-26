@@ -17,6 +17,10 @@ import pagesRouter from './routes/pages.js';
 import askRouter from './routes/ask.js';
 import threadsRouter from './routes/threads.js';
 import metricsRouter from './routes/metrics.js';
+import { sessionMiddleware } from '../auth/session.js';
+import { passport } from '../auth/passport.js';
+import authRouter from './routes/auth.js';
+import passwordRouter from './routes/password.js';
 import { startWorker } from '../ingestion/queue.js';
 import { registerGracefulShutdown } from '../shutdown.js';
 
@@ -45,6 +49,13 @@ app.use(cors(buildCorsOptions(config.nodeEnv, process.env.CORS_ALLOWED_ORIGINS))
 // this JSON body parser — every other route's JSON body is a short query string or a
 // handful of ids, so 256kb is generous headroom, not a tight fit.
 app.use(express.json({ limit: '256kb' }));
+
+// Phase 5 §3.1/§3.2: cookie session (RedisStore-backed) and Passport, both `session:
+// false` on every strategy (auth/passport.js's own header comment) — this is what
+// actually reads/writes `cerebro.sid`. Must run before every router below; none of
+// Phase 5's routes work without `req.session` existing.
+app.use(sessionMiddleware);
+app.use(passport.initialize());
 
 // Phase 6 §7.2: cerebro_request_duration_seconds, recorded around every route regardless
 // of outcome — `res.on('finish', ...)` fires whether the handler resolved normally, threw
@@ -129,6 +140,13 @@ mongoose.connect(config.mongo.uri)
 // probes (phase 1 §8). Not one of the routes phase 1 §1 promised to keep untouched
 // (originally /api/ingest, /api/search, /api/ask; /api/search was re-pointed in Phase 3).
 app.use(healthRouter);
+
+// phase_5_accounts_and_sessions: identity — signup/login/logout, capabilities, Google/
+// GitHub OAuth, and the forgot/verify-otp/reset password flow. `requireAuth` is not yet
+// applied to any route below (that is phase_6_tenancy_and_contexts's first task) — every
+// existing route still serves the flat global pool exactly as before this phase.
+app.use(authRouter);
+app.use(passwordRouter);
 
 // Phase 2: new document-lifecycle API (upload → async ingest → ready), independent of the
 // legacy /api/ingest below. Both write different stores (Qdrant here, MongoDB legacy) so

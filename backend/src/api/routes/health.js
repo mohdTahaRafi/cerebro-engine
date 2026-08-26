@@ -52,9 +52,13 @@ async function safeQueueDepth() {
   }
 }
 
+// Phase 6: countPoints/countPagePoints are now tenant-required (§2). /health reports
+// whole-deployment totals for operators — a single integer, never document content or a
+// per-tenant breakdown — so it uses the two infra-only, deliberately-unscoped counters
+// vectorStore.js carries specifically for this (see that module's own comment).
 async function safeCollectionCounts() {
   try {
-    const [chunks, pages] = await Promise.all([vectorStore.countPoints(), vectorStore.countPagePoints()]);
+    const [chunks, pages] = await Promise.all([vectorStore.countAllPoints(), vectorStore.countAllPagePoints()]);
     return { [config.qdrant.chunksCollection]: chunks, [config.qdrant.pagesCollection]: pages };
   } catch {
     return null;

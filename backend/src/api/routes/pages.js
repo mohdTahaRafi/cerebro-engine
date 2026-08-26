@@ -5,12 +5,16 @@ import * as storage from '../../providers/storage.js';
 const router = express.Router();
 
 // GET /api/pages/:documentId/:page.jpg — serves a rendered scanned page (phase 4 §7.5).
-// The Mongo existence check runs before the storage read specifically so a deleted
-// document's images become unreachable immediately, even if storage cleanup lags.
+// The Mongo existence+ownership check runs before the storage read specifically so a
+// deleted OR foreign document's images become unreachable immediately, even if storage
+// cleanup lags. Phase 6 §5.1: this route "matters more than it looks" — unauthenticated,
+// a leaked or guessed documentId would expose the page; it now requires requireAuth (app
+// level, index.js) plus this ownership check, and 404s a foreign id exactly like a
+// nonexistent one.
 router.get('/api/pages/:documentId/:page.jpg', async (req, res, next) => {
   try {
-    const doc = await Document.findById(req.params.documentId).select('_id');
-    if (!doc) return res.status(404).end();      // deleted document ⇒ image unreachable
+    const doc = await Document.findOne({ _id: req.params.documentId, userId: req.user._id }).select('_id');
+    if (!doc) return res.status(404).end();      // deleted OR foreign document ⇒ image unreachable
 
     const key = `pages/${req.params.documentId}/${req.params.page}.jpg`;
     if (!(await storage.exists(key))) return res.status(404).end();

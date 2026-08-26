@@ -37,6 +37,12 @@ export interface SessionResponse { user: SessionUser | null; }
 export interface SignupRequest { email: string; password: string; name?: string; }
 export interface LoginRequest  { email: string; password: string; }
 
+/** POST /api/auth/signup — phase_5 §7/§8: identical body whether the address was new or
+ *  already had an account, so a client cannot tell those two cases apart from this
+ *  response alone. `AuthContext.signUp` resolves the ambiguity itself by calling
+ *  `GET /api/auth/session` immediately after — see that function's own comment. */
+export interface SignupResponse { ok: true; }
+
 /** Which OTP channels the server can actually deliver on. Drives whether the
  *  UI offers "send to my phone" at all — an unconfigured channel is ABSENT,
  *  never a button that fails (architecture §4). */
@@ -76,8 +82,8 @@ export interface CreateContextRequest { title: string; description?: string; }
 
 // ── Documents (Epic 2) ──────────────────────────────────────────────────────
 export type DocumentStatus = 'queued' | 'processing' | 'ready' | 'failed' | 'duplicate';
-/** The five PRD-named lifecycle stages. Interim: derived on the client from
- *  status + progress until Phase 7 adds a real `stage` field (phase_2 §5.3). */
+/** The five PRD-named lifecycle stages. A real backend field as of phase_7 §5.3
+ *  (backend/src/models/Document.js) — no longer derived on the client. */
 export type IngestStage = 'queued' | 'parsing' | 'chunking' | 'embedding' | 'ready' | 'failed';
 
 export interface DocumentRecord {
@@ -85,6 +91,10 @@ export interface DocumentRecord {
   fileName: string; mimeType: string; sizeBytes: number;
   status: DocumentStatus;
   stage: IngestStage;
+  /** phase_7 §5.3 — populated only during the parsing stage when visual pages are
+   *  present (e.g. "OCR and page embedding, 12 pages"), built server-side; `null`
+   *  otherwise. Replaces the client-derived sub-label. */
+  stageDetail: string | null;
   progress: number;              // 0–100
   chunkCount: number; pageCount: number;
   textPageCount: number; visualPageCount: number;
@@ -230,7 +240,7 @@ export interface QueueStats {
   oldestWaitingAgeMs: number | null;
 }
 export interface PipelineErrorRecord {
-  id: string; kind: 'parse' | 'embed' | 'vision' | 'rerank' | 'generate' | 'queue' | 'notify';
+  id: string; kind: 'parse' | 'embed' | 'vision' | 'rerank' | 'generate' | 'queue' | 'notify' | 'trace' | 'projection';
   message: string; documentId: string | null; fileName: string | null;
   contextId: string | null; stack: string | null; retryable: boolean; createdAt: string;
 }

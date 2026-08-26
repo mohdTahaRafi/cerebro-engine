@@ -11,6 +11,7 @@ import { Link } from 'react-router';
 const KIND_LABEL: Record<PipelineErrorRecord['kind'], string> = {
   parse: 'PARSE', embed: 'EMBED', vision: 'VISION', rerank: 'RERANK',
   generate: 'GENERATE', queue: 'QUEUE', notify: 'NOTIFY',
+  trace: 'TRACE', projection: 'PROJECTION',
 };
 
 function relativeTime(iso: string): string {

@@ -74,12 +74,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (req: SignupRequest) => {
-    const res = await api.auth.signup(req);
-    if (res.user) {
-      setUser(res.user);
+    // phase_5 §7/§8: POST /api/auth/signup responds `202 { ok: true }` whether the
+    // address was brand new or already had an account — an identical body either way is
+    // what keeps this endpoint from being an account-existence oracle. That means THIS
+    // response can never say whether a session was established; the only way to find out
+    // is to ask (GET /api/auth/session, i.e. `probe()`), same as a cold page load does.
+    await api.auth.signup(req);
+    const sessionRes = await api.auth.session();
+    if (sessionRes.user) {
+      setUser(sessionRes.user);
       setStatus('authenticated');
     }
-    return res.user;
+    return sessionRes.user;
   }, []);
 
   const signOut = useCallback(async () => {

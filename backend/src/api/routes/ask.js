@@ -11,6 +11,7 @@ import { MAX_QUERY_CHARS } from '../../retrieval/constants.js';
 import { buildTelemetry } from '../../telemetry/pipelineTelemetry.js';
 import { recordPipelineTelemetry } from '../../telemetry/metrics.js';
 import { config } from '../../config/index.js';
+import { requireContext } from '../middleware/requireContext.js';
 
 const router = express.Router();
 
@@ -28,7 +29,9 @@ function isArrayOfObjectIds(value) {
 // objects here would be an easy way to leak them past their natural lifecycle.
 export const activeStreams = new Set();
 
-router.post('/api/ask', async (req, res) => {
+// Phase 6 §5.4: contextId is required in the body — requireContext resolves it and 404s
+// before the graph is ever invoked (the milestone's own literal check).
+router.post('/api/ask', requireContext, async (req, res) => {
   const { query, threadId, scopeDocumentIds } = req.body ?? {};
 
   if (typeof query !== 'string' || !query.trim()) {
@@ -42,6 +45,13 @@ router.post('/api/ask', async (req, res) => {
   }
   if (scopeDocumentIds !== undefined && !isArrayOfObjectIds(scopeDocumentIds)) {
     return res.status(400).json({ error: 'scopeDocumentIds must be an array of document ids.' });
+  }
+  // A threadId from another tenant (guessed, leaked, or copied from a different browser
+  // session) must 404 exactly like requireContext's own foreign-id check — never resume a
+  // conversation that does not belong to this user in this context.
+  if (threadId !== undefined) {
+    const owned = await Conversation.exists({ _id: threadId, userId: req.tenant.userId, contextId: req.tenant.contextId });
+    if (!owned) return res.status(404).json({ error: 'Thread not found.' });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -86,7 +96,9 @@ router.post('/api/ask', async (req, res) => {
   const runId = randomUUID();
 
   try {
-    const conversationId = threadId ?? (await Conversation.create({}))._id;
+    const conversationId = threadId ?? (await Conversation.create({
+      userId: req.tenant.userId, contextId: req.tenant.contextId,
+    }))._id;
     // Emitted before the graph runs at all — deliberately earlier than §9.1's table
     // shows, because a brand-new thread's id must reach the client even if the request
     // then errors or gets aborted before the `telemetry` frame (the only other place the
@@ -95,11 +107,10 @@ router.post('/api/ask', async (req, res) => {
     emit('threadId', { threadId: conversationId });
 
     const final = await ragGraph.invoke(
-      { query, threadId: conversationId, scopeDocumentIds: scopeDocumentIds ?? null },
+      { query, threadId: conversationId, scopeDocumentIds: scopeDocumentIds ?? null, tenant: req.tenant },
       { configurable: { emit }, signal: abort.signal, runName: 'ragGraph', runId },
     );
 
-    await persistTurn(conversationId, query, final);
     // totalMs is computed here, from the route's own request-entry timestamp, rather than
     // read off any single node's internal timer (phase 6 §2.1) — no individual node's
     // timer spans condense+retrieve+rerank+generate, so only the route itself can measure
@@ -113,10 +124,17 @@ router.post('/api/ask', async (req, res) => {
       requestT0,
     );
     recordPipelineTelemetry(telemetry);
+
+    // Phase 7 §2.4: the trace is written before the `telemetry` frame is emitted, so
+    // `traceId` is real (resolvable by GET /api/traces/:id) by the time the client
+    // receives it — ordering matters, not just presence.
+    const { traceId } = await persistTurn(conversationId, req.tenant, query, final, { telemetry, runId });
+
     emit('telemetry', {
       threadId: conversationId,
       telemetry,
       runId,
+      traceId,
       langsmith: config.tracing.enabled
         ? { orgId: config.tracing.orgId, project: config.tracing.project }
         : null,
@@ -140,7 +158,7 @@ router.post('/api/ask', async (req, res) => {
 //   threadId   { threadId }                                       once, first — before the graph even runs
 //   sources    { sources: [...] }                                  once, before the first token
 //   token      { token: "…" }                                      per generated token
-//   telemetry  { telemetry: PipelineTelemetry, runId, langsmith }  once, after generation
+//   telemetry  { telemetry: PipelineTelemetry, runId, traceId, langsmith }  once, after generation
 //   error      { error: "…" }                                      on failure, terminal
 //   [DONE]     raw sentinel                                         always last on success
 //

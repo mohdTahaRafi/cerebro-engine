@@ -9,5 +9,9 @@ export async function noContextNode(state, config) {
   const answer = MESSAGES[state.emptyReason] ?? MESSAGES.no_relevant_matches;
   emit('sources', { sources: [] });
   emit('token', { token: answer });     // same event shape as generation, so the client needs no branch
-  return { answer };
+  // Phase 7 §2.5: the only place `refused: true` is ever set — persistTurn/traceCapture
+  // read this to mark the trace, and its candidates (rerankNode's `allCandidates`,
+  // already on state) are every one of them `belowFloor: true` by construction, since the
+  // graph only reaches this node when nothing cleared the floor.
+  return { answer, refused: true };
 }

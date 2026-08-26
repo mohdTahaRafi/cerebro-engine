@@ -20,12 +20,25 @@ import { config } from '../../config/index.js';
 const connection = new IORedis(config.redis.url);
 connection.on('error', (err) => console.error('[rateLimit] Redis connection error:', err.message));
 
+// Phase 6 §5.5: keyed on identity when the request is authenticated, IP otherwise.
+// IP-keyed limits punish everyone behind a corporate NAT and are evaded by an
+// authenticated attacker with a proxy pool; identity-keyed limits are the opposite on
+// both counts. `req.user` is only ever populated for a route requireAuth has already run
+// on — index.js mounts requireAuth for every prefix these limiters cover BEFORE the
+// limiter middleware, specifically so this keyGenerator sees it. Every one of
+// `/api/auth/*` never gets requireAuth (there is no identity yet to key on), so those
+// routes stay IP-keyed automatically — no separate branch needed here.
+function identityKey(req) {
+  return req.user ? `u:${req.user._id}` : `ip:${req.ip}`;
+}
+
 function limiter(windowMs, max, name, extra = {}) {
   return rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: identityKey,
     store: new RedisStore({
       sendCommand: (...args) => connection.call(...args),
       prefix: `rl:${name}:`,

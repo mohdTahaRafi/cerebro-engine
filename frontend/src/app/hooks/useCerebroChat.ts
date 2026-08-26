@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { api } from '../../api';
 import type { LangSmithLink } from '../components/core/TelemetryTypes';
 import type { PipelineTelemetry, ProvenanceSource } from '../../api/contracts';
-import * as threadContexts from '../../api/mock/fixtures/threadContexts'; // PHASE-6-REMOVE
 
 // Matches retrieval/search.js's toPublicResult projection (backend), re-declared in
 // api/contracts.ts so the api boundary owns its own contract (phase_1 §4.2) rather than
@@ -60,10 +59,9 @@ export function useCerebroChat() {
         // frame could legitimately carry neither.
         switch (evt.event) {
           case 'threadId':
+            // Phase 6 §5.4: Conversation.contextId is now real, written server-side the
+            // moment the thread is created — no client-side assignment needed.
             setThreadId(evt.threadId);
-            // PHASE-6-REMOVE — phase_3_chat_ui.md §7.2's context filter needs to know
-            // which context a thread belongs to; the backend doesn't carry that yet.
-            if (options.contextId) threadContexts.assign(evt.threadId, options.contextId);
             break;
           case 'sources':
             setSources(evt.sources);

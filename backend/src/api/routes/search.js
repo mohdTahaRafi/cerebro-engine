@@ -1,9 +1,12 @@
 // POST /api/search (phase 3 §8). Mounts at the same path the legacy MongoDB-backed
 // handler served — this is the first cutover point: /api/search now reads Qdrant instead
 // of MongoDB. The legacy handler's module was deleted in Phase 6 (§5.1) once this path
-// had soaked.
+// had soaked. Phase 6 §5.4: contextId is now required in the body — requireContext (which
+// reads it from body/query/params, in that order) resolves and verifies it, and is the
+// only place `req.tenant` is built.
 import express from 'express';
 import { search } from '../../retrieval/search.js';
+import { requireContext } from '../middleware/requireContext.js';
 import { MAX_QUERY_CHARS, TOP_N_DEFAULT, TOP_N_MIN, TOP_N_MAX } from '../../retrieval/constants.js';
 
 const router = express.Router();
@@ -18,7 +21,7 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
-router.post('/api/search', async (req, res, next) => {
+router.post('/api/search', requireContext, async (req, res, next) => {
   const { query, documentIds, topN } = req.body ?? {};
 
   if (typeof query !== 'string' || query.trim() === '') {
@@ -32,7 +35,7 @@ router.post('/api/search', async (req, res, next) => {
   }
 
   try {
-    const result = await search(query, {
+    const result = await search(req.tenant, query, {
       documentIds: documentIds ?? null,
       topN: clamp(Number(topN ?? TOP_N_DEFAULT), TOP_N_MIN, TOP_N_MAX),
     });

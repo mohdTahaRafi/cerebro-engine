@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { search } from '../../src/retrieval/search.js';
 import * as vectorStore from '../../src/providers/vectorStore.js';
 import { config } from '../../src/config/index.js';
+import { FIXTURE_TENANT } from './fixtureTenant.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const QUERY_SET = JSON.parse(await fs.readFile(path.join(HERE, 'queries.json'), 'utf8'));
@@ -58,7 +59,7 @@ async function main() {
     if (PACE_MS && rows.length > 0) await sleep(PACE_MS);
     const expectedPointId = await resolveExpectedPointId(testCase);
     const scope = testCase.scopeDocumentId ? [testCase.scopeDocumentId] : null;
-    const { results } = await search(testCase.query, { documentIds: scope });
+    const { results } = await search(FIXTURE_TENANT, testCase.query, { documentIds: scope });
     const top3 = results.slice(0, 3).map((r) => r.pointId);
     const passed = testCase.expectEmpty ? results.length === 0 : top3.includes(expectedPointId);
     rows.push({ id: testCase.id, query: testCase.query, tests: testCase.tests, passed });

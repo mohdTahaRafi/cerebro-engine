@@ -10,14 +10,25 @@ import { config } from '../config/index.js';
 import { initTracing } from '../telemetry/tracing.js';
 import { requestDuration } from '../telemetry/metrics.js';
 import { askLimiter, searchLimiter, uploadLimiter, globalLimiter } from './middleware/rateLimit.js';
+import { requireAuth } from './middleware/requireAuth.js';
 import healthRouter from './routes/health.js';
+import contextsRouter from './routes/contexts.js';
 import documentsRouter from './routes/documents.js';
 import searchRouter from './routes/search.js';
 import pagesRouter from './routes/pages.js';
 import askRouter from './routes/ask.js';
 import threadsRouter from './routes/threads.js';
 import metricsRouter from './routes/metrics.js';
+import tracesRouter from './routes/traces.js';
+import vectorsRouter from './routes/vectors.js';
+import adminRouter from './routes/admin.js';
+import { sessionMiddleware } from '../auth/session.js';
+import { passport } from '../auth/passport.js';
+import authRouter from './routes/auth.js';
+import passwordRouter from './routes/password.js';
 import { startWorker } from '../ingestion/queue.js';
+import { startContextDeleteWorker } from '../contexts/queue.js';
+import { startProjectionWorker } from '../projection/worker.js';
 import { registerGracefulShutdown } from '../shutdown.js';
 
 const app = express();
@@ -46,6 +57,13 @@ app.use(cors(buildCorsOptions(config.nodeEnv, process.env.CORS_ALLOWED_ORIGINS))
 // handful of ids, so 256kb is generous headroom, not a tight fit.
 app.use(express.json({ limit: '256kb' }));
 
+// Phase 5 §3.1/§3.2: cookie session (RedisStore-backed) and Passport, both `session:
+// false` on every strategy (auth/passport.js's own header comment) — this is what
+// actually reads/writes `cerebro.sid`. Must run before every router below; none of
+// Phase 5's routes work without `req.session` existing.
+app.use(sessionMiddleware);
+app.use(passport.initialize());
+
 // Phase 6 §7.2: cerebro_request_duration_seconds, recorded around every route regardless
 // of outcome — `res.on('finish', ...)` fires whether the handler resolved normally, threw
 // into errorHandler, or the client's own request was rejected by a rate limiter upstream
@@ -60,6 +78,17 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Phase 6 §5.1: requireAuth on every route named there — mounted BEFORE the rate
+// limiters below specifically so rateLimit.js's identity keyGenerator sees `req.user`
+// already populated (§5.5). `/health`, `/api/health`, `/metrics`, and `/api/auth/*` stay
+// public — none of their prefixes appear here. Phase 7 adds `/api/traces` and
+// `/api/vectors`. `/api/admin` is deliberately absent: admin.js's own requireAdmin
+// already wraps requireAuth (middleware/requireAdmin.js), so adding it here would just
+// run the same session lookup twice on every admin request.
+for (const prefix of ['/api/documents', '/api/search', '/api/ask', '/api/threads', '/api/pages', '/api/contexts', '/api/traces', '/api/vectors']) {
+  app.use(prefix, requireAuth);
+}
 
 // Phase 6 §6.1: per-route budgets, applied before the routers that would otherwise handle
 // these paths. Every request under /api/* also counts against the global backstop below,
@@ -99,10 +128,19 @@ mongoose.connect(config.mongo.uri)
                 console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
                 const worker = startWorker();
                 console.log('[CEREBRO] Ingest worker started (concurrency 2)');
-                // Phase 6 §6.2, §11: SIGTERM drains in-flight SSE streams, closes this
-                // same worker instance (not a fresh one — closing a worker BullMQ never
+                // Phase 6 §6.2: a second, separate BullMQ worker for the context-delete
+                // queue — its own queue means a 20s cascade never occupies an ingest slot.
+                const contextDeleteWorker = startContextDeleteWorker();
+                console.log('[CEREBRO] Context-delete worker started (concurrency 1)');
+                // Phase 7 §4.5: a third, separate BullMQ worker for the projection
+                // queue — a UMAP fit is CPU-bound and must not occupy an ingest slot
+                // (same reasoning the context-delete queue is already split out for).
+                const projectionWorker = startProjectionWorker();
+                console.log('[CEREBRO] Projection worker started (concurrency 1)');
+                // Phase 6 §6.2, §11: SIGTERM drains in-flight SSE streams, closes these
+                // same worker instances (not fresh ones — closing a worker BullMQ never
                 // started would be a no-op that only looks like a clean shutdown), then exits.
-                registerGracefulShutdown(server, { worker });
+                registerGracefulShutdown(server, { workers: [worker, contextDeleteWorker, projectionWorker] });
             }, 100);
         });
 
@@ -130,9 +168,22 @@ mongoose.connect(config.mongo.uri)
 // (originally /api/ingest, /api/search, /api/ask; /api/search was re-pointed in Phase 3).
 app.use(healthRouter);
 
-// Phase 2: new document-lifecycle API (upload → async ingest → ready), independent of the
-// legacy /api/ingest below. Both write different stores (Qdrant here, MongoDB legacy) so
-// they coexist without conflict until Phase 6 decommissions the legacy path.
+// phase_5_accounts_and_sessions: identity — signup/login/logout, capabilities, Google/
+// GitHub OAuth, and the forgot/verify-otp/reset password flow. Stays public — no
+// requireAuth prefix above covers /api/auth.
+app.use(authRouter);
+app.use(passwordRouter);
+
+// Phase 6: Context CRUD plus the nested document routes that replace v1's global
+// POST/GET /api/documents (§5.4, §6). Mounted before documentsRouter so its
+// POST/GET /api/contexts/:contextId/documents routes are matched first — documentsRouter
+// no longer defines either of those paths, but keeping the tenant-scoped, requireContext
+// gated routes ahead of the single-document ones mirrors that ordering intent.
+app.use(contextsRouter);
+
+// Phase 2: single-document lifecycle routes (GET, GET .../status, POST .../reingest,
+// DELETE) — ownership-checked against req.user (Phase 6 §5.4). Upload and the tenant-
+// scoped list moved to contextsRouter above.
 app.use(documentsRouter);
 
 // Phase 3: hybrid retrieval + reranking, mounted at the same /api/search path the legacy
@@ -149,6 +200,13 @@ app.use(pagesRouter);
 // /api/ask handler below (removed here — same path, new SSE envelope, thread-aware).
 app.use(askRouter);
 app.use(threadsRouter);
+
+// Phase 7: the trace list/detail routes (the pipeline's own recorded telemetry), the
+// vector-space projection/beacon/node routes, and the two admin-only operational
+// endpoints — this is what makes the Phase 4 consoles real instead of mock-fed.
+app.use(tracesRouter);
+app.use(vectorsRouter);
+app.use(adminRouter);
 
 // Phase 6 §7.2: Prometheus exposition — mounted like any other router, but deliberately
 // absent from the Caddyfile's route table (§8.2), which is what actually keeps it off the

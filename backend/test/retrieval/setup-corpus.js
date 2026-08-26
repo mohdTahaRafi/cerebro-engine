@@ -19,6 +19,8 @@ import * as parser from '../../src/providers/parser.js';
 import { chunkPages } from '../../src/ingestion/chunker.js';
 import { config } from '../../src/config/index.js';
 
+import { FIXTURE_TENANT } from './fixtureTenant.js';
+
 const CORPUS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'corpus');
 
 // Deterministic fixture ids — queries.json and the regression/floor/scoping suites
@@ -47,7 +49,7 @@ async function ingestFixture(fx) {
     embeddings.encodeDocuments(texts),
     embeddings.encodeSparse(texts),
   ]);
-  await vectorStore.upsertChunks(chunks, dense, sparse);
+  await vectorStore.upsertChunks(FIXTURE_TENANT, chunks, dense, sparse);
   return chunks.length;
 }
 
@@ -64,7 +66,7 @@ async function main() {
 
   let total = 0;
   for (const fx of FIXTURES) {
-    await vectorStore.deleteByDocument(fx.documentId);   // idempotent re-run
+    await vectorStore.deleteByDocument(FIXTURE_TENANT, fx.documentId);   // idempotent re-run
     const count = await ingestFixture(fx);
     total += count;
     console.log(`[setup-corpus] ${fx.fileName} -> ${count} chunk(s)`);

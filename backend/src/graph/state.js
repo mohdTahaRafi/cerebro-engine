@@ -11,6 +11,9 @@ export const RagState = Annotation.Root({
   query:            Annotation({ reducer: (_, next) => next }),
   threadId:         Annotation({ reducer: (_, next) => next }),
   scopeDocumentIds: Annotation({ reducer: (_, next) => next, default: () => null }),
+  // Phase 6 §2: { userId, contextId } — built once by requireContext and carried
+  // unchanged through every node that reaches Qdrant (retrieve, rerank).
+  tenant:           Annotation({ reducer: (_, next) => next }),
 
   // ── Derived ───────────────────────────────────────────────────────────
   history:          Annotation({ reducer: (_, next) => next, default: () => [] }),
@@ -18,6 +21,22 @@ export const RagState = Annotation.Root({
   candidates:       Annotation({ reducer: (_, next) => next, default: () => [] }),
   sources:          Annotation({ reducer: (_, next) => next, default: () => [] }),
   answer:           Annotation({ reducer: (_, next) => next, default: () => '' }),
+
+  // Phase 7 §2.2, task 7.3: the full pre-floor candidate set, normalized to Trace.js's
+  // CandidateSchema shape and stamped with belowFloor — set once by rerankNode and never
+  // touched again (generateNode/noContextNode return no `allCandidates` key, so the
+  // last-write-wins reducer never sees a second write to clobber it).
+  allCandidates:    Annotation({ reducer: (_, next) => next, default: () => [] }),
+  // Phase 7 §2.2, task 7.2: the exact prompt blocks the model received, set once by
+  // generateNode.
+  promptBlocks:     Annotation({ reducer: (_, next) => next, default: () => [] }),
+  // Phase 7 §2.2: the raw provider usage the graph observed, forwarded onto state so
+  // persistTurn can build Trace.tokens without re-deriving it from llm.js's own
+  // recordGenerationUsage call (which writes UsageEvent but returns nothing to the caller).
+  usage:            Annotation({ reducer: (_, next) => next, default: () => null }),
+  // Phase 7 §2.5: stamped true only by noContextNode — the one place FR-GEN-03's refusal
+  // actually runs.
+  refused:          Annotation({ reducer: (_, next) => next, default: () => false }),
 
   // ── Accumulated ───────────────────────────────────────────────────────
   // Append, never replace: each node contributes its own timings and the graph

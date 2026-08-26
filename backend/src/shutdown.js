@@ -17,7 +17,11 @@ import { activeStreams } from './api/routes/ask.js';
 const DRAIN_TIMEOUT_MS = Number(process.env.SSE_DRAIN_TIMEOUT_MS ?? 30_000);
 const POLL_INTERVAL_MS = 250;
 
-export function registerGracefulShutdown(server, { worker } = {}) {
+// Phase 6 §6.2: `workers` is a list, not a single instance — the context-delete queue
+// (contexts/queue.js) runs its own BullMQ Worker alongside the ingest one, and both must
+// be given the chance to let their current job finish before the process exits.
+export function registerGracefulShutdown(server, { worker, workers } = {}) {
+  const allWorkers = [...(workers ?? []), ...(worker ? [worker] : [])];
   let shuttingDown = false;
 
   async function shutdown(signal) {
@@ -47,14 +51,17 @@ export function registerGracefulShutdown(server, { worker } = {}) {
       console.log('[shutdown] all in-flight SSE streams finished');
     }
 
-    if (worker) {
-      // BullMQ Worker.close() lets whatever job is currently executing finish (or, if it
-      // doesn't finish before BullMQ's own lock expires, requeues it for the next worker
-      // to pick up) rather than the process disappearing mid-job — the ingestion pipeline
-      // is not written to resume partway through a stage, only to retry a whole job.
-      await worker.close();
-      console.log('[shutdown] ingest worker closed');
+    // BullMQ Worker.close() lets whatever job is currently executing finish (or, if it
+    // doesn't finish before BullMQ's own lock expires, requeues it for the next worker to
+    // pick up) rather than the process disappearing mid-job — neither the ingestion
+    // pipeline nor the cascade job is written to resume partway through a stage, only to
+    // retry a whole job. Closed sequentially, not in parallel: there is no benefit to
+    // racing two independent shutdowns, and sequential keeps the log order deterministic.
+    for (const w of allWorkers) {
+      // eslint-disable-next-line no-await-in-loop
+      await w.close();
     }
+    if (allWorkers.length > 0) console.log(`[shutdown] ${allWorkers.length} worker(s) closed`);
 
     console.log('[shutdown] exiting');
     process.exit(0);

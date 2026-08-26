@@ -10,7 +10,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '../../components/ui/select';
 import { Input } from '../../components/ui/input';
-import { MockBadge } from '../../components/design/MockBadge';
 import { ContextCard } from '../../components/contexts/ContextCard';
 import { ContextFormDialog } from '../../components/contexts/ContextFormDialog';
 import { useContexts } from '../../hooks/useContexts';
@@ -71,7 +70,6 @@ export function ContextList() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-ink">Contexts</h1>
-              <MockBadge force title="Contexts are local to this browser until Phase 6 adds them to the backend." />
             </div>
             <p className="mt-1 text-sm text-graphite">Organize your documents into isolated contexts.</p>
           </div>

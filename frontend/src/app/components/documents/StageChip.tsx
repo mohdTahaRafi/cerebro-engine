@@ -2,11 +2,15 @@
 // alone), a determinate progress bar while in flight, and the §5.2 stageDetail sub-label.
 // Reduced motion swaps the spinning glyph for the percentage as text — the user still
 // needs to know work is in flight, just without the animation.
+//
+// Phase 7 §5.3: `doc.stage`/`doc.stageDetail` are now real backend fields
+// (backend/src/models/Document.js) — the client-side status+progress derivation this
+// component used to import from './stage' is deleted; the table reads the backend's own
+// truth directly.
 import { Circle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { Progress } from '../ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { DocumentRecord, IngestStage } from '../../../api/contracts';
-import { deriveStage, stageDetail } from './stage';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 
 const STAGE_META: Record<IngestStage, { label: string; pill: string; icon: 'hollow' | 'spin' | 'check' | 'x' }> = {
@@ -18,12 +22,12 @@ const STAGE_META: Record<IngestStage, { label: string; pill: string; icon: 'holl
   failed:    { label: 'Failed',    pill: 'bg-critical-soft text-critical-text border-critical-soft-line', icon: 'x' },
 };
 
-type StageChipDoc = Pick<DocumentRecord, 'status' | 'progress' | 'visualPageCount' | 'duplicateOfFileName'>;
+type StageChipDoc = Pick<DocumentRecord, 'status' | 'stage' | 'stageDetail' | 'progress' | 'duplicateOfFileName'>;
 
 export function StageChip({ doc }: { doc: StageChipDoc }) {
-  const stage = deriveStage(doc);
+  const stage = doc.stage;
   const meta = STAGE_META[stage];
-  const detail = stageDetail(doc);
+  const detail = doc.stageDetail;
   const reducedMotion = useReducedMotion();
   const inProgress = stage === 'parsing' || stage === 'chunking' || stage === 'embedding';
   const isDuplicate = doc.status === 'duplicate';

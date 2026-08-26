@@ -7,6 +7,7 @@
 import assert from 'assert';
 import { search } from '../../src/retrieval/search.js';
 import { config } from '../../src/config/index.js';
+import { FIXTURE_TENANT } from './fixtureTenant.js';
 
 // 20 broad queries, deliberately chosen to be plausible for MORE than one fixture
 // document (revenue/price/identifiers/headers all appear in more than one fixture) — the
@@ -31,7 +32,7 @@ async function main() {
   let leaked = 0;
   for (const [i, query] of QUERIES.entries()) {
     if (PACE_MS && i > 0) await sleep(PACE_MS);
-    const { results } = await search(query, { documentIds: [SCOPE] });
+    const { results } = await search(FIXTURE_TENANT, query, { documentIds: [SCOPE] });
     const outOfScope = results.filter((r) => r.documentId !== SCOPE);
     leaked += outOfScope.length;
   }

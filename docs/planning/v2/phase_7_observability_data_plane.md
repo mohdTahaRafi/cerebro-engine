@@ -366,9 +366,15 @@ interesting thing the beacon can show.
 ### 4.5 The rebuild job
 
 BullMQ queue `projection`, concurrency **1** across the whole process. Jobs are deduplicated
-per context with `jobId: \`projection:${contextId}\`` and `removeOnComplete` — BullMQ drops a
+per context with `jobId: \`projection-${contextId}\`` and `removeOnComplete` — BullMQ drops a
 duplicate id while one is pending, so a user re-uploading 50 documents produces one fit, not
 fifty ([architecture.md §9](architecture.md)).
+
+> **Amendment (implementation).** The dedup key uses a dash, not the colon this section
+> originally specified: BullMQ's `Job` rejects any custom id containing `:` ("Custom Id
+> cannot contain :"), verified live on first enqueue. `contexts/queue.js`'s own header
+> comment already flags the identical restriction for queue *names*; this is the same
+> restriction, discovered here for job ids.
 
 Enqueued on: ingest completion, document delete, and an explicit *Rebuild* action. **Not** on
 every chunk upsert.

@@ -2,6 +2,9 @@
 
 > Repo-specific facts about **Cerebro** (dirs, run commands, constraints, git rules) live in [AGENTS.md](AGENTS.md). Read that for work *inside this codebase*. This file governs **how I plan and build anything new**.
 
+## Communication Style
+- Explain root causes and status reports in plain language first (what broke, what it means for the app, what I'm doing about it). Only go to algorithm/regex/byte-level detail if I ask for it.
+
 ---
 
 # PART I — SPEC-DRIVEN DEVELOPMENT MODE (MANDATORY)

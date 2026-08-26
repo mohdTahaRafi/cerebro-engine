@@ -58,7 +58,13 @@ export async function embedPages(storagePath, documentId, pages) {
   form.append('pdfBytes', new Blob([pdfBuffer], { type: 'application/pdf' }), 'document.pdf');
 
   const res = await embedPagesBreaker.fire(form);
-  return res.data;
+  // Unwrap the envelope: /embed_pages answers with EmbedPagesResponse
+  // (`{ pages, elapsedMs }`, vision/app/schemas.py), not a bare array. Callers want the
+  // per-page results — ingestDocument.js maps/filters this return value directly — so
+  // returning `res.data` handed them an object and failed with "visualResults.map is not
+  // a function" on the first scanned page ever routed here. Same unwrapping as
+  // embedQuery's `res.data.multivector` below.
+  return res.data.pages;
 }
 
 // Query-side embedding — the interactive query path (phase 4 §7.1), not one of phase 1

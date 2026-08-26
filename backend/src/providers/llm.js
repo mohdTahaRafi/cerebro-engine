@@ -1,19 +1,33 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOllama } from '@langchain/ollama';
+import { ChatGroq } from '@langchain/groq';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
 import { recordUsage } from '../telemetry/usage.js';
 
-// architecture §5.8: Claude Sonnet 5 primary, Ollama llama3.2-vision:11b fallback,
-// switched via LLM_PROVIDER — an operator decision, never an automatic runtime one
-// (architecture §6.2: Anthropic failure returns 503 rather than silently degrading
-// answer quality).
+// architecture §5.8: Claude Sonnet 5 primary, switched via LLM_PROVIDER — an operator
+// decision, never an automatic runtime one (architecture §6.2: Anthropic failure returns
+// 503 rather than silently degrading answer quality). Two fallbacks, chosen for different
+// reasons: Ollama is the fully-offline option (no network dependency at all, but every
+// deployer needs their own model pulled locally — see deployment.md §3.4/§8). Groq is the
+// zero-local-setup option — a hosted, OpenAI-compatible API with a free tier (no card,
+// 30k tokens/min, 14.4k requests/day as of the models this project targets) — so a
+// deployment needs only an API key, the same shape as the Anthropic path, with none of
+// Ollama's "the host machine IS the inference server" requirement.
 export function chatModel({ temperature = 0, maxTokens = 1024 } = {}) {
   if (config.llm.provider === 'ollama') {
     return new ChatOllama({
       baseUrl: config.llm.ollama.baseUrl,
       model: config.llm.ollama.model,
       temperature,
+    });
+  }
+  if (config.llm.provider === 'groq') {
+    return new ChatGroq({
+      apiKey: config.llm.groq.apiKey,
+      model: config.llm.groq.model,
+      temperature,
+      maxTokens,
     });
   }
   return new ChatAnthropic({
@@ -35,15 +49,35 @@ export async function ping() {
   await llmBreaker.fire(model, 'Reply with the single word: pong');
 }
 
-// Phase 5 §7.3: an explicit FR-GEN edge case is LLM_PROVIDER=ollama configured with a
-// text-only model while a visual (scanned-page) source was retrieved. Claude always
-// reads images; a self-hosted Ollama model only does if it's one of the known
-// vision-capable model families. When this returns false the generate node omits the
-// image content blocks entirely (OCR text is still supplied) and emits a warning —
-// the answer degrades to OCR-quality rather than the request failing outright.
+// Phase 5 §7.3: an explicit FR-GEN edge case is LLM_PROVIDER=ollama/groq configured with
+// a text-only model while a visual (scanned-page) source was retrieved. Claude always
+// reads images; a self-hosted Ollama model or a Groq model only does if it's one of the
+// known vision-capable families. When this returns false the generate node omits the
+// image content blocks entirely (OCR text is still supplied) and emits a warning — the
+// answer degrades to OCR-quality rather than the request failing outright.
+//
+// 'scout'/'maverick' cover Groq's Llama 4 vision-capable models where an account has
+// access to them — verified live 2026-08-17 that this project's own Groq key does not
+// (its `GET /v1/models` lists no vision-capable chat model at all: text models only,
+// plus audio/guard/agentic ones). This pattern is deliberately name-based rather than a
+// hardcoded allowlist for the same reason config/index.js's groq default comment gives:
+// Groq's actual per-account model lineup does not reliably match what's documented
+// publicly, so matching by name degrades to OCR-quality automatically if a configured
+// model is renamed, withdrawn, or was never on the account to begin with, rather than
+// erroring. The config default (openai/gpt-oss-120b) is text-only regardless.
+//
+// gpt-oss models emit a separate `reasoning` field before `content` (visible via a raw
+// API response, collapsed into `.content` by LangChain) and reasoning tokens count
+// against maxTokens — a tight budget (ping()'s maxTokens: 5) can be fully consumed by
+// reasoning, returning empty content with finish_reason "length" rather than an error.
+// ping() never inspects content, only that the call resolves, so this doesn't break
+// /health; generate.js's maxTokens: 1024 has comfortable headroom for both.
+const VISION_MODEL_PATTERN = /vision|llava|llama3\.2-vision|qwen2?-vl|scout|maverick/i;
+
 export function supportsVision(providerConfig) {
   if (providerConfig.provider === 'anthropic') return true;
-  return /vision|llava|llama3\.2-vision|qwen2?-vl/i.test(providerConfig.ollama.model);
+  if (providerConfig.provider === 'groq') return VISION_MODEL_PATTERN.test(providerConfig.groq.model);
+  return VISION_MODEL_PATTERN.test(providerConfig.ollama.model);
 }
 
 // Streaming itself needs no wrapper here — chatModel() returns a LangChain ChatModel and

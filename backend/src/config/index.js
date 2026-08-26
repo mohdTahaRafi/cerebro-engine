@@ -58,7 +58,7 @@ export const config = {
   llamaParse: { apiKey: required('LLAMA_CLOUD_API_KEY') },
 
   llm: {
-    provider: process.env.LLM_PROVIDER ?? 'anthropic', // 'anthropic' | 'ollama'
+    provider: process.env.LLM_PROVIDER ?? 'anthropic', // 'anthropic' | 'ollama' | 'groq'
     anthropic: {
       apiKey: process.env.ANTHROPIC_API_KEY,
       model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
@@ -66,6 +66,19 @@ export const config = {
     ollama: {
       baseUrl: process.env.OLLAMA_API_URL ?? 'http://127.0.0.1:11434',
       model: process.env.OLLAMA_MODEL ?? 'llama3.2-vision:11b',
+    },
+    // Hosted, OpenAI-compatible, free-tier option (providers/llm.js's header comment) —
+    // no local model to install or pull, unlike Ollama. Default model is a Groq-hosted
+    // open-weight text model; see providers/llm.js's VISION_MODEL_PATTERN comment for why
+    // vision is opt-in via GROQ_MODEL rather than defaulted on. Model availability is
+    // per-account, not fixed — verify against `GET /openai/v1/models` for the configured
+    // key before assuming a name from Groq's docs/marketing is actually reachable; this
+    // default (openai/gpt-oss-120b) was confirmed live against this project's key after
+    // llama-3.3-70b-versatile — assumed available from public docs — turned out not to be
+    // on this account at all (404 model_not_found, verified 2026-08-17).
+    groq: {
+      apiKey: process.env.GROQ_API_KEY,
+      model: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
     },
   },
 
@@ -92,8 +105,13 @@ export const config = {
   },
 };
 
-// Provider-conditional validation: the primary LLM path needs its key.
+// Provider-conditional validation: whichever LLM path is selected needs its key.
+// Ollama needs none — it's a local process, not an API key.
 if (config.llm.provider === 'anthropic' && !config.llm.anthropic.apiKey) {
   console.error('[config] LLM_PROVIDER=anthropic requires ANTHROPIC_API_KEY.');
+  process.exit(1);
+}
+if (config.llm.provider === 'groq' && !config.llm.groq.apiKey) {
+  console.error('[config] LLM_PROVIDER=groq requires GROQ_API_KEY.');
   process.exit(1);
 }

@@ -14,10 +14,12 @@ import { buildTelemetry } from '../telemetry/pipelineTelemetry.js';
 import { recordPipelineTelemetry } from '../telemetry/metrics.js';
 import { mergeByProvenance } from './merge.js';
 import { createTimer } from './timer.js';
-import { FUSION_LIMIT, PAGE_FUSION_LIMIT, RELEVANCE_FLOOR, TOP_N_DEFAULT } from './constants.js';
+import {
+  FUSION_LIMIT, PAGE_FUSION_LIMIT, RELEVANCE_FLOOR, RETENTION_FRACTION, STOPWORDS, TOP_N_DEFAULT,
+} from './constants.js';
 
 const EMPTY_MESSAGES = {
-  empty_query: 'Query is empty after normalization.',
+  empty_query: 'Query contains no searchable terms.',   // BUG-003: also covers stopword-only input
   empty_corpus: 'No documents have been ingested yet.',
   no_relevant_matches: 'No content in your documents is relevant to this question.',
 };
@@ -235,6 +237,45 @@ export const retrieveCandidates = traceable(
   { name: 'retrieveCandidates', run_type: 'chain', client: getTracingClient() },
 );
 
+// BUG-002 (docs/bugs/BUG-002-relevance-floor-absolute-threshold.md): the relevance floor
+// stays an absolute test — measurement showed the score is meaningful in absolute terms and
+// only the 0.15 threshold was wrong — but a second, relative step decides which of the
+// accepted candidates survive.
+//
+//   1. Accept/reject. The top score must clear RELEVANCE_FLOOR. Below it the reranker found
+//      nothing above corpus noise, and the caller turns the empty set into
+//      no_relevant_matches without spending a generate call.
+//   2. Retention. Keep candidates within RETENTION_FRACTION of the peak. The floor now sits
+//      near the noise level, so it alone would admit most of the reranked set; anchoring to
+//      the peak keeps the answer and its nearest support instead of a long weak tail.
+//
+// Returns `{ results, topScore }`. `results` is [] for the reject case — exactly what the
+// old single filter returned, so the caller's empty-state handling is unchanged.
+function applyRelevanceGate(ranked) {
+  // Degraded rerank: every score is null. Pass everything through untouched — degraded
+  // ranking must not also trigger a spurious empty state.
+  if (ranked.length === 0 || ranked[0].relevanceScore === null) {
+    return { results: ranked, topScore: null };
+  }
+
+  const topScore = ranked[0].relevanceScore;   // rerank returns descending order
+  if (topScore < RELEVANCE_FLOOR) return { results: [], topScore };
+
+  const cutoff = topScore * RETENTION_FRACTION;
+  return { results: ranked.filter((r) => r.relevanceScore >= cutoff), topScore };
+}
+
+// BUG-003 (docs/bugs/BUG-003-stopword-only-queries.md). True when the query contains at
+// least one token that is not a closed-class function word. Tokenizes on Unicode letters
+// and digits so accented and non-Latin scripts survive: any such token is absent from the
+// English-only STOPWORDS set and therefore counts as content, which is the intended
+// fail-safe for a multilingual corpus. A query of pure punctuation has no tokens at all and
+// is rejected, which is the desired outcome for input like "...".
+function hasContentWord(query) {
+  const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return tokens.some((tok) => !STOPWORDS.has(tok));
+}
+
 async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } = {}) {
   const t = createTimer();
 
@@ -243,6 +284,13 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
   // only fires for a whitespace-only (or empty) input — a punctuation-only query like
   // "..." survives normalization and is searched as real (if low-value) query text.
   if (!query) return emptyResult('empty_query', t);
+
+  // BUG-003: reject a query with no content word before spending retrieval on it. This has
+  // to happen here rather than at the relevance floor because the reranker scores a bare
+  // stopword *highly* against ordinary prose (0.911 for "the"), so no score threshold can
+  // distinguish it from a real question. Reported as empty_query — it is the same class of
+  // problem as an empty string: nothing was actually asked.
+  if (!hasContentWord(query)) return emptyResult('empty_query', t);
 
   const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
   const candidatesRetrieved = chunkCandidates.length + pageCandidates.length;
@@ -254,7 +302,7 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
     });
   }
 
-  // 3. Merge visual page candidates by provenance — a scanned page retrieved by both the
+// 3. Merge visual page candidates by provenance — a scanned page retrieved by both the
   //    OCR-chunk branch and the ColPali branch must not occupy two reranker slots and two
   //    result rows carrying the same evidence (architecture §5.5, phase 4 §7.2).
   const merged = mergeStage(chunkCandidates, pageCandidates, t);
@@ -278,10 +326,9 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
 
   const warnings = skipped ? ['Reranking was unavailable; results are in fusion order.'] : [];
 
-  // 5. Apply the relevance floor. `rerankSkipped` means every score is null, and the
-  //    filter passes everything through — degraded ranking must not also trigger a
-  //    spurious empty state.
-  const results = ranked.filter((r) => r.relevanceScore === null || r.relevanceScore >= RELEVANCE_FLOOR);
+  // 5. Decide relevance (BUG-002). `rerankSkipped` means every score is null, and the whole
+  //    gate is bypassed — degraded ranking must not also trigger a spurious empty state.
+  const { results } = applyRelevanceGate(ranked);
 
   if (results.length === 0) {
     return emptyResult('no_relevant_matches', t, {

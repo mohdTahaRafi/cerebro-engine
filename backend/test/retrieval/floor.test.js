@@ -31,8 +31,10 @@ async function main() {
   assert.strictEqual(q2.empty?.reason, 'empty_corpus', `expected empty_corpus, got ${JSON.stringify(q2)}`);
   console.log('[floor.test] PASS — scope with no ingested documents reports empty_corpus, not no_relevant_matches');
 
-  // no_relevant_matches — task 3.7's exact acceptance criterion: an off-corpus query is
-  // rejected with every candidate's score reported below the floor.
+  // no_relevant_matches — task 3.7's exact acceptance criterion, unchanged in form. Only
+  // the floor's *value* moved (0.15 -> 5e-5, see
+  // docs/bugs/BUG-002-relevance-floor-absolute-threshold.md); an off-corpus query is still
+  // rejected with every candidate's score below it.
   if (PACE_MS) await sleep(PACE_MS);
   const q3 = await search('what is the airspeed velocity of a swallow');
   assert.strictEqual(q3.empty?.reason, 'no_relevant_matches', `expected no_relevant_matches, got ${JSON.stringify(q3)}`);
@@ -42,6 +44,17 @@ async function main() {
   );
   assert.ok(q3.empty.candidatesConsidered > 0, 'candidatesConsidered proves retrieval actually ran');
   console.log(`[floor.test] PASS — off-corpus query rejected, bestScore ${q3.empty.bestScore} < floor ${RELEVANCE_FLOOR}, candidatesConsidered=${q3.empty.candidatesConsidered}`);
+
+  // BUG-002 regression: the inverse case, which the old absolute floor got wrong. A
+  // natural-language question that quotes nothing from the corpus must still be answered
+  // when the corpus contains the answer. Northwind's Q3 review is in the fixture corpus.
+  if (PACE_MS) await sleep(PACE_MS);
+  const q4 = await search('how much money did the company make last quarter');
+  assert.ok(
+    !q4.empty && q4.results.length > 0,
+    `expected results for an unquoted but answerable question, got ${JSON.stringify(q4.empty)}`,
+  );
+  console.log(`[floor.test] PASS — unquoted answerable question returns ${q4.results.length} result(s), top score ${q4.results[0].score}`);
 }
 
 await main();

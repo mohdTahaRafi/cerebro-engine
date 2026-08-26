@@ -122,12 +122,25 @@ sign in.
 ```js
 import session from 'express-session';
 import { RedisStore } from 'connect-redis';
-import { redisClient } from '../redis.js';
+import { createClient } from 'redis';        // node-redis v4 — NOT the ioredis client used
+                                              //   elsewhere in this codebase; see the note
+                                              //   below this block
 import { config } from '../config/index.js';
+
+// connect-redis v10's store implementation calls client.set(key, value, { expiration:
+// { type: 'EX', value: ttl } }) — an OBJECT third argument. ioredis's `set` is a flat
+// varargs API (`set(key, value, 'EX', ttl)`) and throws on that object form. The rest of
+// this codebase's shared `redisClient()` (backend/src/redis.js) is ioredis, chosen for
+// BullMQ compatibility, so it cannot be reused here — session.js opens its own dedicated
+// node-redis connection instead. Amended during implementation after reading
+// connect-redis's source directly; the original draft below assumed the shared client
+// would work.
+const sessionRedisClient = createClient({ url: config.redis.url });
+await sessionRedisClient.connect();
 
 export const sessionMiddleware = session({
   name: 'cerebro.sid',                 // not 'connect.sid' — the default advertises the stack
-  store: new RedisStore({ client: redisClient, prefix: 'sess:', ttl: 7 * 24 * 60 * 60 }),
+  store: new RedisStore({ client: sessionRedisClient, prefix: 'sess:', ttl: 7 * 24 * 60 * 60 }),
   secret: config.auth.sessionSecret,   // fail-fast validated at startup; ≥ 32 chars
   resave: false,                       // the store is not touched unless the session changed
   saveUninitialized: false,            // no cookie for an anonymous visitor — this is what
@@ -471,7 +484,7 @@ channel it cannot deliver on ([phase_1 §6.3](phase_1_design_system_and_auth_ui.
 
 ### 5.4 Failure mode: the mail provider is down
 
-`POST /api/auth/password/forgot` **still returns `202`** with the standard body. The send
+`POST /api/auth/forgot-password` **still returns `202`** with the standard body. The send
 failure is written to `pipeline_errors` with `kind: 'notify'` and surfaces on `/admin/health`'s
 error stream. The OTP record is **deleted** on a send failure so the user's next request is not
 blocked by a code that was never delivered — but the cooldown key is left in place, so the
@@ -593,17 +606,33 @@ All under `backend/src/api/routes/auth.js` and `password.js`. Every response bod
 |---|---|---|---|
 | `GET` | `/api/auth/capabilities` | public | `{providers, otpChannels, passwordMinLength}` — computed from config, so an unconfigured provider is absent, not broken |
 | `GET` | `/api/auth/session` | public | `200 {user}` or `200 {user: null}`. Never 401 |
-| `POST` | `/api/auth/signup` | public | Validates, hashes, creates, regenerates the session. Existing email → `202` with the identical body and a *"someone tried to sign up"* email instead (§8) |
+| `POST` | `/api/auth/signup` | public | Validates, hashes, creates, regenerates the session. Response is `202 {ok: true}` in **every** case — a fresh signup and an existing email get the byte-identical body (§8), never the full `SessionResponse`. Existing email → creates no user, sends a *"someone tried to sign up"* email instead. The client (Phase 1's `AuthContext.signUp`) resolves the ambiguity itself by calling `GET /api/auth/session` right after |
 | `POST` | `/api/auth/login` | public | argon2 verify, rate-limited on two axes, regenerates the session, opportunistic rehash |
 | `POST` | `/api/auth/logout` | session | `DEL sess:<sid>`, `SREM usess:…`, clears the cookie. `204` |
 | `POST` | `/api/auth/logout-all` | required | Bumps `credentialVersion`, deletes every `sid` in `usess:<userId>`. `204` |
 | `GET` | `/api/auth/google` | public | Passport start. Stores a validated `returnTo` in the session |
 | `GET` | `/api/auth/google/callback` | public | Resolve → link/create → regenerate → `302` to `returnTo` |
 | `GET` | `/api/auth/github` / `/callback` | public | as above |
-| `POST` | `/api/auth/password/forgot` | public | **Always `202`** with `{sent, channel, maskedDestination, expiresInSeconds, resendAfterSeconds}` |
-| `POST` | `/api/auth/password/resend` | public | Same shape; `429` with `retryAfterSeconds` while the cooldown key exists |
-| `POST` | `/api/auth/password/verify-otp` | public | `{resetToken, expiresInSeconds}` on success; `400` with `otp_invalid`/`otp_expired`/`otp_locked` and `attemptsRemaining` |
-| `POST` | `/api/auth/password/reset` | public | Consumes the token atomically, validates the password, writes the hash, **bumps `credentialVersion`**, kills every session, `204` |
+| `POST` | `/api/auth/forgot-password` | public | **Always `202`** with `{sent, channel, maskedDestination, expiresInSeconds, resendAfterSeconds}`. Also serves as *resend* — see note below |
+| `POST` | `/api/auth/verify-otp` | public | `{resetToken, expiresInSeconds}` on success; `400` with `otp_invalid`/`otp_expired`/`otp_locked` and `attemptsRemaining` |
+| `POST` | `/api/auth/reset-password` | public | Consumes the token atomically, validates the password, writes the hash, adds a `local` identity if the account had none (§6.3), **bumps `credentialVersion`**, kills every session, `204` |
+
+Amended during implementation: the four paths above were originally spelled
+`/api/auth/password/forgot`, `/api/auth/password/resend`, `/api/auth/password/verify-otp`, and
+`/api/auth/password/reset`. `frontend/src/api/endpoints/auth.ts` — written in Phase 1, ahead of
+this phase — already called the flatter `/auth/forgot-password`, `/auth/verify-otp`, and
+`/auth/reset-password`, with no dedicated resend call of its own; the frontend contract in this
+case predates and overrides the backend draft (per this file's own epigraph: "the frontend
+contracts in `frontend/src/api/contracts.ts` are the specification this phase implements
+against"). The dedicated `/password/resend` route is dropped rather than added to the frontend:
+`forgot-password` already doubles as resend safely, because `issueOtp`'s own 60-second cooldown
+key (§5.1) makes a too-fast repeat a silent no-op — still `202`, no new code issued — rather than
+a `429`. A cooldown-triggered `429` on a *bare* resend endpoint would itself be a fourth
+enumeration oracle beyond the three §8 already closes: the cooldown key only ever exists for an
+identifier that actually had a code issued, so its absence vs. presence would leak whether the
+account exists, exactly the class of leak §8 exists to shut down. Folding resend into the same
+route with the same always-`202` response removes the oracle instead of requiring a matching fix
+on a second endpoint.
 
 ### 7.1 Masking
 
@@ -643,7 +672,7 @@ identical body, identical status, comparable latency.
 |---|---|---|
 | `signup` | `202 {ok: true}`; sends *"someone tried to sign up with your address — if it was you, sign in or reset your password"* | `202 {ok: true}`; creates the account and signs in |
 | `login` | `401 {code:'invalid_credentials', message:"That email and password don't match an account."}` | the identical response, after a dummy argon2 hash so the timing matches |
-| `password/forgot` | `202` + code sent | `202`, no code sent, **and a dummy `argon2.hash` is still performed** so the response time sits in the same band |
+| `forgot-password` | `202` + code sent | `202`, no code sent, **and a dummy `argon2.hash` is still performed** so the response time sits in the same band |
 
 The signup case has a wrinkle worth stating: a `202` for an existing account means the client
 cannot distinguish "signed up" from "already existed", so it cannot know whether a session was
@@ -697,7 +726,7 @@ the setup cost it saves is ten minutes, once.
 | 5.3 | Wire `express-session` + `connect-redis` per §3.1 | An anonymous `GET /api/auth/session` sets **no** cookie (`saveUninitialized: false`); after login, `redis-cli KEYS 'sess:*'` shows exactly one key |
 | 5.4 | Implement `requireAuth` with the `credentialVersion` check | Signing in on two browsers, then resetting the password in one, makes the other's next request return `401 session_invalidated` |
 | 5.5 | Implement `hashPassword`/`verifyPassword`/`needsRehash` | `verifyPassword(null, 'x')` returns false and takes within 25% of the time of a real verify (measured over 20 runs) |
-| 5.6 | Implement `validatePassword` with the breach list | `'password1234'` is rejected naming the breach list; `'correct horse battery staple'` is accepted; `'taha@example'` for `taha@example.com` is rejected |
+| 5.6 | Implement `validatePassword` with the breach list | `'unbelievable'` is rejected naming the breach list; `'correct horse battery staple'` is accepted; `'taha@example'` for `taha@example.com` is rejected |
 | 5.7 | Implement `POST /api/auth/signup` with enumeration resistance | Signing up twice with the same email returns two identical `202` bodies; the second creates no user and sends the "someone tried" mail |
 | 5.8 | Implement `POST /api/auth/login` with two-axis rate limiting | The 11th attempt for one email in 15 minutes returns `429` with `retryAfterSeconds`; a wrong password and an unknown email return byte-identical bodies |
 | 5.9 | Implement `logout` and `logout-all` | After `logout-all`, `redis-cli KEYS 'sess:*'` for that user returns nothing and every other browser is signed out |
@@ -716,6 +745,14 @@ the setup cost it saves is ten minutes, once.
 | 5.22 | Swap the frontend off the auth mock | With `VITE_API_MOCK` unset, every Phase 1 auth screen works against the real backend; `MOCKED_ENDPOINTS` no longer contains any `auth.*` entry |
 | 5.23 | Write `npm run test:auth` | `node test/auth/{password,otp,linking,session}.test.js` all pass offline (no network, no live SMTP) |
 
+`'unbelievable'` replaces the original draft's `'password1234'` in 5.6 and in §11's narrative below.
+Verified directly against `breachedPasswords.js`'s actual 10,000-entry set (fetched live from
+SecLists' `10k-most-common.txt`, not invented): `'password1234'` is **not** a member — the top
+10k list skews toward common words and short numeric strings, not `word+digits` composites —
+while `'unbelievable'` is, and it also clears the 12-character minimum on its own. An acceptance
+criterion naming a string the implementation doesn't actually reject is a criterion that cannot
+mechanically pass.
+
 ---
 
 ## 11. Milestone Definition
@@ -732,7 +769,7 @@ Phase 5 is **complete** when:
 > The browser has no `cerebro.sid` cookie at all: `saveUninitialized: false` means the
 > anonymous session probe minted nothing.
 >
-> They sign up as `taha@example.com` with `password1234`, and the form rejects it: *"That
+> They sign up as `taha@example.com` with `unbelievable`, and the form rejects it: *"That
 > password appears in a public breach list. Choose a different one."* They use a real
 > passphrase instead and land on `/chat`. `redis-cli KEYS 'sess:*'` shows exactly one key.
 > They open a second browser and sign in there too; now there are two, and
@@ -748,8 +785,8 @@ Phase 5 is **complete** when:
 >
 > They click *Forgot your password?*, enter the address, and the response is `202` in under two
 > seconds. A real email arrives with the subject **"418362 is your Cerebro reset code"**. They
-> enter `000000` five times: the first four return *"That code isn't right. N attempts left."*
-> with N counting down, and the fifth returns *"Too many attempts."* — and
+> enter `000000` six times: the first five return *"That code isn't right. N attempts left."*
+> with N counting down, and the sixth returns *"Too many attempts."* — and
 > `redis-cli EXISTS otp:pwreset:<id>` now returns `0`. They request a new code; the immediate
 > retry returns `429` with `retryAfterSeconds: 58`, and after a minute it succeeds. They enter
 > the real code, set a new password, and are returned to `/login`.

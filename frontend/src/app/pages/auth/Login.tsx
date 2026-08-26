@@ -18,11 +18,24 @@ import { useAuth } from '../../context/AuthContext';
 import { CerebroApiError } from '../../../api';
 import { sanitizeReturnTo } from '../../lib/returnTo';
 
+// backend/src/api/routes/auth.js's OAuth callback redirects here with `?error=<code>`
+// instead of throwing — resolveIdentity's two refusal branches (linking.js §6.2) plus a
+// catch-all for a tampered `state` or any other handshake failure.
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  verify_existing_first: 'An account already exists for that address. Sign in with your password, then connect this provider from there.',
+  email_taken_unverified: "That address is already in use and hasn't been verified on this account. Sign in with your original method instead.",
+  oauth_failed: 'Something went wrong signing in with that provider. Try again.',
+};
+
 export function Login() {
   const { status, capabilities, signIn, refresh } = useAuth();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const banner = (location.state as { banner?: string } | null)?.banner ?? null;
+  const oauthErrorCode = searchParams.get('error');
+  const oauthErrorMessage = oauthErrorCode
+    ? (OAUTH_ERROR_MESSAGES[oauthErrorCode] ?? OAUTH_ERROR_MESSAGES.oauth_failed)
+    : null;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
@@ -72,6 +85,12 @@ export function Login() {
         {banner && !formError && (
           <div role="status" className="mb-4 rounded-md border border-signal-soft-line bg-signal-soft px-3 py-2 text-sm text-signal">
             {banner}
+          </div>
+        )}
+
+        {oauthErrorMessage && !formError && (
+          <div role="alert" className="mb-4 rounded-md border border-critical-soft-line bg-critical-soft px-3 py-2 text-sm text-critical-text">
+            {oauthErrorMessage}
           </div>
         )}
 

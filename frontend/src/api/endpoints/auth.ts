@@ -1,6 +1,6 @@
 import { request } from '../client';
 import type {
-  SessionResponse, SignupRequest, LoginRequest, AuthCapabilities,
+  SessionResponse, SignupRequest, SignupResponse, LoginRequest, AuthCapabilities,
   ForgotPasswordRequest, ForgotPasswordResponse, VerifyOtpRequest, VerifyOtpResponse,
   ResetPasswordRequest,
 } from '../contracts';
@@ -8,7 +8,7 @@ import type {
 export const auth = {
   session: () => request<SessionResponse>('/auth/session'),
   capabilities: () => request<AuthCapabilities>('/auth/capabilities'),
-  signup: (body: SignupRequest) => request<SessionResponse>('/auth/signup', { method: 'POST', json: body }),
+  signup: (body: SignupRequest) => request<SignupResponse>('/auth/signup', { method: 'POST', json: body }),
   login: (body: LoginRequest) => request<SessionResponse>('/auth/login', { method: 'POST', json: body }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   forgotPassword: (body: ForgotPasswordRequest) =>

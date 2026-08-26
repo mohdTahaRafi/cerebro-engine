@@ -37,6 +37,12 @@ export interface SessionResponse { user: SessionUser | null; }
 export interface SignupRequest { email: string; password: string; name?: string; }
 export interface LoginRequest  { email: string; password: string; }
 
+/** POST /api/auth/signup — phase_5 §7/§8: identical body whether the address was new or
+ *  already had an account, so a client cannot tell those two cases apart from this
+ *  response alone. `AuthContext.signUp` resolves the ambiguity itself by calling
+ *  `GET /api/auth/session` immediately after — see that function's own comment. */
+export interface SignupResponse { ok: true; }
+
 /** Which OTP channels the server can actually deliver on. Drives whether the
  *  UI offers "send to my phone" at all — an unconfigured channel is ABSENT,
  *  never a button that fails (architecture §4). */

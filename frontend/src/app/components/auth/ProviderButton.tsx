@@ -1,9 +1,17 @@
 // phase_1 §6.1 — "One button per capabilities.providers, below the divider... An
 // unconfigured provider is absent, never a button that fails." Shared between /login and
 // /signup so capabilities.providers drives the same set on both.
+//
+// Phase 5: wired to the real redirect. This is a plain `<a>` (rendered with the Button's
+// styling via `asChild`), NOT a click handler that calls `fetch` — the OAuth handshake is
+// a full top-level navigation away to Google/GitHub and back (backend/src/api/routes/
+// auth.js's GET /api/auth/:provider), and a fetch call cannot follow that kind of
+// cross-origin redirect chain the way a real browser navigation does.
+import { useSearchParams } from 'react-router';
 import { Github } from 'lucide-react';
 import { Button } from '../ui/button';
 import { cn } from '../ui/utils';
+import { sanitizeReturnTo, encodeReturnTo } from '../../lib/returnTo';
 
 function GoogleGlyph() {
   return (
@@ -32,18 +40,23 @@ export function ProviderButton({
   className?: string;
 }) {
   const { label, Icon } = PROVIDER_META[provider];
+  const [searchParams] = useSearchParams();
+  // Same validation both ends share (frontend/src/app/lib/returnTo.ts) — sanitized here
+  // before it ever leaves the browser, and re-validated server-side
+  // (backend/src/auth/mask.js's safeReturnTo) since neither end trusts the other alone.
+  const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
+  const href = `/api/auth/${provider}?returnTo=${encodeReturnTo(returnTo)}`;
+
   return (
     <Button
-      type="button"
+      asChild
       variant="outline"
       className={cn('w-full gap-2 border-line bg-surface-raised', className)}
-      // Phase 5 wires the real redirect; the mock has no server-side OAuth to hand off
-      // to, so this is inert (not a button that lies about success) until then.
-      disabled
-      title="Available once the backend auth service lands (Phase 5)"
     >
-      <Icon className="size-4" aria-hidden="true" />
-      {action} with {label}
+      <a href={href}>
+        <Icon className="size-4" aria-hidden="true" />
+        {action} with {label}
+      </a>
     </Button>
   );
 }

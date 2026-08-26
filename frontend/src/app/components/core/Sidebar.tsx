@@ -6,7 +6,7 @@
 //
 // §7.2's four additions over what Phase 1 shipped: recency group headers, inline rename,
 // delete (confirming once and stating the message count), and filtering to the active
-// context (client-side this phase, PHASE-6-REMOVE — see threadContexts.ts).
+// context — server-side as of Phase 6 (GET /api/threads?contextId=).
 //
 // There is no standalone nav item for a document list — every document belongs to a
 // context and is reached through the context detail view, which the data model doesn't
@@ -211,8 +211,6 @@ function ThreadRow({ thread, active, onOpen, onRename, onDelete }: ThreadRowProp
 export function Sidebar() {
   const { user } = useAuth();
   const { isGenerating } = useEngine();
-  // PHASE-6-REMOVE (§7.2) — client-side context filter; server-side once Thread carries a
-  // real contextId (Phase 6).
   const { activeContext } = useContextScope();
   const navigate = useNavigate();
   const location = useLocation();

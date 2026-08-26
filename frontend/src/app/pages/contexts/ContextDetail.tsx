@@ -10,7 +10,6 @@ import { Button } from '../../components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { MockBadge } from '../../components/design/MockBadge';
 import { ContextFormDialog } from '../../components/contexts/ContextFormDialog';
 import { DeleteContextDialog } from '../../components/contexts/DeleteContextDialog';
 import { ContextMetaPanel } from '../../components/contexts/ContextMetaPanel';
@@ -113,7 +112,6 @@ export function ContextDetail() {
                       <Button variant="ghost" size="icon" className="size-7" aria-label="Rename context" onClick={() => setRenameOpen(true)}>
                         <Pencil className="size-3.5" />
                       </Button>
-                      <MockBadge force title="Context assignment is local to this browser." />
                     </div>
                     <p className="text-sm text-graphite">{context.description || '—'}</p>
                   </div>

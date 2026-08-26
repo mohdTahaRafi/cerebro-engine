@@ -3,7 +3,7 @@
 // breakers, and collection counts on the same page are NOT here — those come from the real
 // `/api/health` (architecture §7.3's table), never mocked.
 import type { QueueStats, PipelineErrorRecord } from '../../contracts';
-import { list as listContexts } from './contexts';
+import { DEMO_CONTEXTS } from './demoContexts';
 
 export function queueStats(): QueueStats {
   // A little time-based jitter so a page left open doesn't show a perfectly static number —
@@ -34,7 +34,7 @@ const ERROR_TEMPLATES: Array<Omit<PipelineErrorRecord, 'id' | 'createdAt' | 'doc
 const AGE_MINUTES = [2, 18, 47, 96, 210, 480];
 
 export function pipelineErrors(): PipelineErrorRecord[] {
-  const ctx = listContexts()[0] ?? null;
+  const ctx = DEMO_CONTEXTS[0] ?? null;
   const now = Date.now();
   return ERROR_TEMPLATES.map((t, i) => ({
     ...t,

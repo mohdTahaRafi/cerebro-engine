@@ -137,12 +137,12 @@ const tracedColpaliEmbed = traceable(
 );
 
 const tracedRetrieve = traceable(
-  (args) => vectorStore.hybridQuery(args),
+  (tenant, args) => vectorStore.hybridQuery(tenant, args),
   { name: 'retrieve', run_type: 'retriever', client: getTracingClient() },
 );
 
 const tracedPageRetrieve = traceable(
-  (args) => vectorStore.multivectorQuery(args),
+  (tenant, args) => vectorStore.multivectorQuery(tenant, args),
   { name: 'retrievePages', run_type: 'retriever', client: getTracingClient() },
 );
 
@@ -156,7 +156,7 @@ const tracedRerank = traceable(
 // reimplementing the concurrent dense+sparse+ColPali calls. Takes the caller's timer
 // rather than owning one, so runSearch below keeps reporting one continuous set of marks
 // across the whole pipeline (retrieval + rerank) the way it always has.
-async function retrieveStage(query, documentIds, t) {
+async function retrieveStage(tenant, query, documentIds, t) {
   // 1. Encode query — dense (Cohere API), sparse (local BM25), and ColPali multivector
   //    (vision service) all run concurrently. All three are independent network/local
   //    calls; serializing any of them would only add its latency to the others' critical
@@ -180,11 +180,11 @@ async function retrieveStage(query, documentIds, t) {
   //    call would misreport 0ms as if it were a real, instantaneous retrieval.
   t.mark('retrieveStart');
   const [chunkCandidates, pageCandidates] = await Promise.all([
-    tracedRetrieve({
+    tracedRetrieve(tenant, {
       denseVector: denseRes.vector, sparseVector: sparseVec, limit: FUSION_LIMIT, documentIds,
     }).then((r) => { t.mark('retrieveEnd'); return r; }),
     colpaliVec
-      ? tracedPageRetrieve({ queryMultivector: colpaliVec, limit: PAGE_FUSION_LIMIT, documentIds })
+      ? tracedPageRetrieve(tenant, { queryMultivector: colpaliVec, limit: PAGE_FUSION_LIMIT, documentIds })
           .then((r) => { t.mark('pageRetrieveEnd'); return r; })
           .catch((err) => {
             // Degrades independently, same as the ColPali embed call above — a Qdrant
@@ -217,10 +217,10 @@ function mergeStage(chunkCandidates, pageCandidates, t) {
 // countPoints call) so this function's contract stays a plain "give me ranked-by-fusion
 // candidates," reusable outside the /api/search response envelope.
 export const retrieveCandidates = traceable(
-  async function retrieveCandidates(rawQuery, { documentIds = null } = {}) {
+  async function retrieveCandidates(tenant, rawQuery, { documentIds = null } = {}) {
     const t = createTimer();
     const query = normalize(rawQuery);
-    const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
+    const { chunkCandidates, pageCandidates } = await retrieveStage(tenant, query, documentIds, t);
     const candidates = mergeStage(chunkCandidates, pageCandidates, t);
     return {
       candidates,
@@ -235,7 +235,7 @@ export const retrieveCandidates = traceable(
   { name: 'retrieveCandidates', run_type: 'chain', client: getTracingClient() },
 );
 
-async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } = {}) {
+async function runSearch(tenant, rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } = {}) {
   const t = createTimer();
 
   const query = normalize(rawQuery);
@@ -244,11 +244,11 @@ async function runSearch(rawQuery, { documentIds = null, topN = TOP_N_DEFAULT } 
   // "..." survives normalization and is searched as real (if low-value) query text.
   if (!query) return emptyResult('empty_query', t);
 
-  const { chunkCandidates, pageCandidates } = await retrieveStage(query, documentIds, t);
+  const { chunkCandidates, pageCandidates } = await retrieveStage(tenant, query, documentIds, t);
   const candidatesRetrieved = chunkCandidates.length + pageCandidates.length;
 
   if (chunkCandidates.length === 0 && pageCandidates.length === 0) {
-    const corpusSize = await vectorStore.countPoints(documentIds);
+    const corpusSize = await vectorStore.countPoints(tenant, documentIds);
     return emptyResult(corpusSize === 0 ? 'empty_corpus' : 'no_relevant_matches', t, {
       candidatesConsidered: 0,
     });

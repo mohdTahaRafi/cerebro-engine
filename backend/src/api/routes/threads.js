@@ -1,4 +1,7 @@
-// GET/PATCH/DELETE /api/threads — thread CRUD and history resume (phase 5 §10.1).
+// GET/PATCH/DELETE /api/threads — thread CRUD and history resume (phase 5 §10.1). Phase
+// 6 §5.4: filtered by `userId` (requireAuth runs at the app level, index.js); `contextId`
+// is an optional query filter, not required — the sidebar's global thread rail lists
+// across every context, and /contexts/:id's own view narrows with `?contextId=`.
 import express from 'express';
 import mongoose from 'mongoose';
 import { Conversation } from '../../models/Conversation.js';
@@ -17,10 +20,17 @@ router.get('/api/threads', async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page ?? 1));
     const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20)));
+    const filter = { userId: req.user._id };
+    if (req.query.contextId) {
+      if (!isValidId(req.query.contextId)) {
+        return res.status(400).json({ error: 'contextId is not a valid id.' });
+      }
+      filter.contextId = req.query.contextId;
+    }
 
     const [threads, total] = await Promise.all([
-      Conversation.find().sort({ lastMessageAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      Conversation.countDocuments(),
+      Conversation.find(filter).sort({ lastMessageAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      Conversation.countDocuments(filter),
     ]);
 
     const counts = await Message.aggregate([
@@ -44,7 +54,7 @@ router.get('/api/threads/:id', async (req, res, next) => {
   try {
     if (!isValidId(req.params.id)) return res.status(404).json({ error: 'Thread not found.' });
 
-    const thread = await Conversation.findById(req.params.id).lean();
+    const thread = await Conversation.findOne({ _id: req.params.id, userId: req.user._id }).lean();
     if (!thread) return res.status(404).json({ error: 'Thread not found.' });
 
     const messages = await Message.find({ conversationId: req.params.id }).sort({ createdAt: 1 }).lean();
@@ -61,7 +71,7 @@ router.get('/api/threads/:id', async (req, res, next) => {
     // page citation the same way toPublicResult does — not resurrecting the chunk text,
     // which was never stored here and isn't worth a Qdrant round-trip for a history view.
     const documentIds = [...new Set(messages.flatMap((m) => m.sources.map((s) => String(s.documentId))))];
-    const docsById = new Map((await Document.find({ _id: { $in: documentIds } }).select('_id fileName').lean())
+    const docsById = new Map((await Document.find({ _id: { $in: documentIds }, userId: req.user._id }).select('_id fileName').lean())
       .map((d) => [String(d._id), d]));
 
     const resolved = messages.map((m) => ({
@@ -99,8 +109,8 @@ router.patch('/api/threads/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'title exceeds 200 characters.' });
     }
 
-    const thread = await Conversation.findByIdAndUpdate(
-      req.params.id, { title: title.trim() }, { new: true },
+    const thread = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user._id }, { title: title.trim() }, { new: true },
     );
     if (!thread) return res.status(404).json({ error: 'Thread not found.' });
 
@@ -116,7 +126,7 @@ router.delete('/api/threads/:id', async (req, res, next) => {
   try {
     if (!isValidId(req.params.id)) return res.status(404).json({ error: 'Thread not found.' });
 
-    const thread = await Conversation.findById(req.params.id);
+    const thread = await Conversation.findOne({ _id: req.params.id, userId: req.user._id });
     if (!thread) return res.status(404).json({ error: 'Thread not found.' });
 
     const { deletedCount } = await Message.deleteMany({ conversationId: thread._id });

@@ -19,7 +19,7 @@ export async function rerankNode(state) {
   const t0 = performance.now();
 
   if (state.candidates.length === 0) {
-    const corpusEmpty = (await vectorStore.countPoints()) === 0;
+    const corpusEmpty = (await vectorStore.countPoints(state.tenant)) === 0;
     return {
       sources: [],
       emptyReason: corpusEmpty ? 'empty_corpus' : 'no_relevant_matches',

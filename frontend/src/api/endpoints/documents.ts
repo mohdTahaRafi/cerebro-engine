@@ -2,16 +2,14 @@
 // (pollDocumentStatus) and IngestionZone (an inline `while (true)`) — phase_1 §8.
 // The 1500ms interval and 5-minute timeout are unchanged from both originals.
 //
-// phase_2 §7.4 — every real backend call here still hits the real `/api/documents` routes
-// (upload, status, reingest, delete all genuinely exist and genuinely do the work). What's
-// interim is the shape: the backend's `Document` model has no `contextId` or `stage` field
-// yet (that's Phase 6/7), so `normalize()` attaches both client-side before anything else
-// in the app sees a `DocumentRecord` — `contextId` from the PHASE-6-REMOVE map in
-// mock/fixtures/docContexts.ts, `stage` from stage.ts's derivation (deleted in Phase 7).
+// Phase 6 §5.4, §9: the backend's `Document` model now carries a real `contextId`
+// (backend/src/models/Document.js) and every route is nested under
+// `/api/contexts/:contextId/...` (backend/src/api/routes/contexts.js) — the interim
+// client-side `contextId` mapping (mock/fixtures/docContexts.ts) is gone; `stage` is
+// still derived on the client from status + progress until Phase 7 adds a real field.
 import { request } from '../client';
 import type { DocumentRecord, DocumentStatus } from '../contracts';
 import { deriveStage } from '../../app/components/documents/stage';
-import * as docContexts from '../mock/fixtures/docContexts';
 
 export interface IngestionResponse {
   documentId: string;
@@ -47,20 +45,18 @@ const POLL_TIMEOUT_MS = 5 * 60_000;
 const LIST_LIMIT = 200;
 
 /** The shape a Mongoose `Document` actually serializes to over `res.json()` — `_id`, and
- *  neither `contextId` nor `stage` (phase_2 §7.4, §5.2). `duplicateOf` is the raw ObjectId
- *  ref (or null); the list route doesn't populate it to a filename, so `normalize` below
- *  resolves it against the rest of the same batch instead. */
+ *  a REAL `contextId` as of Phase 6 (backend/src/models/Document.js), unlike Phase 2's
+ *  interim client-side mapping. Still no `stage` (phase_2 §5.2). */
 interface RawDocument {
-  _id: string; fileName: string; mimeType: string; sizeBytes: number;
+  _id: string; contextId: string; fileName: string; mimeType: string; sizeBytes: number;
   status: DocumentStatus; progress: number; error: string | null;
   chunkCount: number; pageCount: number; textPageCount: number; visualPageCount: number;
   warnings: string[]; createdAt: string; duplicateOf: string | null;
 }
 
 function normalize(raw: RawDocument, fileNameById: Map<string, string>): DocumentRecord {
-  const contextId = docContexts.contextIdFor(raw._id) ?? '';   // PHASE-6-REMOVE
   const withoutStage = {
-    id: raw._id, contextId,
+    id: raw._id, contextId: raw.contextId,
     fileName: raw.fileName, mimeType: raw.mimeType, sizeBytes: raw.sizeBytes,
     status: raw.status, progress: raw.progress,
     chunkCount: raw.chunkCount, pageCount: raw.pageCount,
@@ -72,30 +68,22 @@ function normalize(raw: RawDocument, fileNameById: Map<string, string>): Documen
 }
 
 export const documents = {
-  /** Fetches the full document list from the real backend and normalizes every row.
-   *  `contextId`, when passed, narrows to that context's rows — PHASE-6-REMOVE, purely
-   *  client-side, since the backend has no contextId column to filter on (§7.4). Omitting
-   *  it (used by /contexts' aggregate counts) returns every document in the pool. */
-  async list(contextId?: string): Promise<{ documents: DocumentRecord[] }> {
-    const { documents: raw } = await request<{ documents: RawDocument[] }>(`/documents?limit=${LIST_LIMIT}`);
+  /** Fetches a context's document list from the real, tenant-scoped backend route and
+   *  normalizes every row. `contextId` is now REQUIRED (Phase 6 §5.4) — every document
+   *  belongs to exactly one context, and the backend has no unscoped list route anymore. */
+  async list(contextId: string): Promise<{ documents: DocumentRecord[] }> {
+    const { documents: raw } = await request<{ documents: RawDocument[] }>(
+      `/contexts/${contextId}/documents?limit=${LIST_LIMIT}`,
+    );
     const fileNameById = new Map(raw.map((d) => [d._id, d.fileName] as const));
     const normalized = raw.map((d) => normalize(d, fileNameById));
-    return { documents: contextId ? normalized.filter((d) => d.contextId === contextId) : normalized };
+    return { documents: normalized };
   },
 
-  upload(file: File, contextId?: string): Promise<IngestionResponse> {
+  upload(file: File, contextId: string): Promise<IngestionResponse> {
     const formData = new FormData();
     formData.append('document', file);
-    return request<IngestionResponse>('/documents', { method: 'POST', body: formData })
-      .then((res) => {
-        // PHASE-6-REMOVE — records which context this upload belongs to, client-side only.
-        // As of Phase 3, every real caller (Composer's attach button and /chat's page-wide
-        // GlobalDropzone alike, both routed through useUploadQueue) passes the active
-        // context's id; `contextId` is optional only so a hypothetical unscoped caller
-        // doesn't crash — such an upload would carry no context assignment.
-        if (contextId) docContexts.assign(res.documentId, contextId);
-        return res;
-      });
+    return request<IngestionResponse>(`/contexts/${contextId}/documents`, { method: 'POST', body: formData });
   },
 
   status: (documentId: string) =>
@@ -104,11 +92,8 @@ export const documents = {
   reingest: (documentId: string) =>
     request<ReindexResponse>(`/documents/${documentId}/reingest`, { method: 'POST' }),
 
-  async remove(documentId: string): Promise<DeleteDocumentResponse> {
-    const res = await request<DeleteDocumentResponse>(`/documents/${documentId}`, { method: 'DELETE' });
-    docContexts.unassign(documentId);   // PHASE-6-REMOVE
-    return res;
-  },
+  remove: (documentId: string) =>
+    request<DeleteDocumentResponse>(`/documents/${documentId}`, { method: 'DELETE' }),
 
   async pollUntilSettled(
     documentId: string,

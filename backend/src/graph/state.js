@@ -11,6 +11,9 @@ export const RagState = Annotation.Root({
   query:            Annotation({ reducer: (_, next) => next }),
   threadId:         Annotation({ reducer: (_, next) => next }),
   scopeDocumentIds: Annotation({ reducer: (_, next) => next, default: () => null }),
+  // Phase 6 §2: { userId, contextId } — built once by requireContext and carried
+  // unchanged through every node that reaches Qdrant (retrieve, rerank).
+  tenant:           Annotation({ reducer: (_, next) => next }),
 
   // ── Derived ───────────────────────────────────────────────────────────
   history:          Annotation({ reducer: (_, next) => next, default: () => [] }),

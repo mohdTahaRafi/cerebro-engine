@@ -2,6 +2,9 @@ import mongoose from 'mongoose';
 
 const MessageSchema = new mongoose.Schema({
   conversationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation', required: true, index: true },
+  // Phase 6 §4.2: defense in depth, since `conversationId` already implies ownership —
+  // every read of a Message goes through its parent Conversation's own tenant check.
+  userId:         { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   role:           { type: String, required: true, enum: ['user', 'assistant'] },
   content:        { type: String, required: true },
   condensedQuery: { type: String, default: null },   // what retrieval actually ran on

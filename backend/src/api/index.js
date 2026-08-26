@@ -10,7 +10,9 @@ import { config } from '../config/index.js';
 import { initTracing } from '../telemetry/tracing.js';
 import { requestDuration } from '../telemetry/metrics.js';
 import { askLimiter, searchLimiter, uploadLimiter, globalLimiter } from './middleware/rateLimit.js';
+import { requireAuth } from './middleware/requireAuth.js';
 import healthRouter from './routes/health.js';
+import contextsRouter from './routes/contexts.js';
 import documentsRouter from './routes/documents.js';
 import searchRouter from './routes/search.js';
 import pagesRouter from './routes/pages.js';
@@ -22,6 +24,7 @@ import { passport } from '../auth/passport.js';
 import authRouter from './routes/auth.js';
 import passwordRouter from './routes/password.js';
 import { startWorker } from '../ingestion/queue.js';
+import { startContextDeleteWorker } from '../contexts/queue.js';
 import { registerGracefulShutdown } from '../shutdown.js';
 
 const app = express();
@@ -72,6 +75,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// Phase 6 §5.1: requireAuth on every route named there — mounted BEFORE the rate
+// limiters below specifically so rateLimit.js's identity keyGenerator sees `req.user`
+// already populated (§5.5). `/health`, `/api/health`, `/metrics`, and `/api/auth/*` stay
+// public — none of their prefixes appear here.
+for (const prefix of ['/api/documents', '/api/search', '/api/ask', '/api/threads', '/api/pages', '/api/contexts']) {
+  app.use(prefix, requireAuth);
+}
+
 // Phase 6 §6.1: per-route budgets, applied before the routers that would otherwise handle
 // these paths. Every request under /api/* also counts against the global backstop below,
 // cumulatively with whichever specific limiter applies — see rateLimit.js's own comment.
@@ -110,10 +121,14 @@ mongoose.connect(config.mongo.uri)
                 console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
                 const worker = startWorker();
                 console.log('[CEREBRO] Ingest worker started (concurrency 2)');
-                // Phase 6 §6.2, §11: SIGTERM drains in-flight SSE streams, closes this
-                // same worker instance (not a fresh one — closing a worker BullMQ never
+                // Phase 6 §6.2: a second, separate BullMQ worker for the context-delete
+                // queue — its own queue means a 20s cascade never occupies an ingest slot.
+                const contextDeleteWorker = startContextDeleteWorker();
+                console.log('[CEREBRO] Context-delete worker started (concurrency 1)');
+                // Phase 6 §6.2, §11: SIGTERM drains in-flight SSE streams, closes these
+                // same worker instances (not fresh ones — closing a worker BullMQ never
                 // started would be a no-op that only looks like a clean shutdown), then exits.
-                registerGracefulShutdown(server, { worker });
+                registerGracefulShutdown(server, { workers: [worker, contextDeleteWorker] });
             }, 100);
         });
 
@@ -142,15 +157,21 @@ mongoose.connect(config.mongo.uri)
 app.use(healthRouter);
 
 // phase_5_accounts_and_sessions: identity — signup/login/logout, capabilities, Google/
-// GitHub OAuth, and the forgot/verify-otp/reset password flow. `requireAuth` is not yet
-// applied to any route below (that is phase_6_tenancy_and_contexts's first task) — every
-// existing route still serves the flat global pool exactly as before this phase.
+// GitHub OAuth, and the forgot/verify-otp/reset password flow. Stays public — no
+// requireAuth prefix above covers /api/auth.
 app.use(authRouter);
 app.use(passwordRouter);
 
-// Phase 2: new document-lifecycle API (upload → async ingest → ready), independent of the
-// legacy /api/ingest below. Both write different stores (Qdrant here, MongoDB legacy) so
-// they coexist without conflict until Phase 6 decommissions the legacy path.
+// Phase 6: Context CRUD plus the nested document routes that replace v1's global
+// POST/GET /api/documents (§5.4, §6). Mounted before documentsRouter so its
+// POST/GET /api/contexts/:contextId/documents routes are matched first — documentsRouter
+// no longer defines either of those paths, but keeping the tenant-scoped, requireContext
+// gated routes ahead of the single-document ones mirrors that ordering intent.
+app.use(contextsRouter);
+
+// Phase 2: single-document lifecycle routes (GET, GET .../status, POST .../reingest,
+// DELETE) — ownership-checked against req.user (Phase 6 §5.4). Upload and the tenant-
+// scoped list moved to contextsRouter above.
 app.use(documentsRouter);
 
 // Phase 3: hybrid retrieval + reranking, mounted at the same /api/search path the legacy

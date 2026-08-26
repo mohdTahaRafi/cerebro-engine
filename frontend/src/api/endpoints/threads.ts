@@ -1,5 +1,4 @@
 import { request } from '../client';
-import * as threadContexts from '../mock/fixtures/threadContexts'; // PHASE-6-REMOVE
 
 export interface ThreadSummary {
   _id: string;
@@ -29,13 +28,12 @@ export interface ThreadMessage {
 }
 
 export const threads = {
-  /** `contextId`, when passed, narrows to that context's threads — PHASE-6-REMOVE, purely
-   *  client-side against threadContexts.ts, since the backend has no contextId column on
-   *  Thread to filter on yet (phase_3_chat_ui.md §7.2). Omitting it returns every thread. */
+  /** `contextId`, when passed, narrows to that context's threads — server-side now
+   *  (phase_6 §5.4): GET /api/threads accepts it as an optional query filter. Omitting it
+   *  returns every thread the signed-in user owns. */
   async list(contextId?: string): Promise<{ threads: ThreadSummary[] }> {
-    const { threads: all } = await request<{ threads: ThreadSummary[] }>('/threads');
-    if (!contextId) return { threads: all };
-    return { threads: all.filter((t) => threadContexts.contextIdFor(t._id) === contextId) };
+    const qs = contextId ? `?contextId=${encodeURIComponent(contextId)}` : '';
+    return request<{ threads: ThreadSummary[] }>(`/threads${qs}`);
   },
 
   get: (id: string) =>
@@ -46,6 +44,5 @@ export const threads = {
 
   async delete(id: string): Promise<void> {
     await request<void>(`/threads/${id}`, { method: 'DELETE' });
-    threadContexts.unassign(id); // PHASE-6-REMOVE
   },
 };

@@ -39,6 +39,50 @@ export async function ping() {
 // health ping instead of the real operation.
 const qdrantOpBreaker = wrap('qdrant.chunks', (fn) => fn(), { timeout: 5_000 });
 
+// ── Phase 6: tenancy (§2) ─────────────────────────────────────────────────────────────
+//
+// Every exported query function below takes a `tenant` object as its first, required
+// argument and throws before issuing any request if it is missing or incomplete. The
+// throw is a TypeError, not a returned error: a missing tenant is a programming defect,
+// and a defect that returns an empty result set would look like "no matches" and ship.
+//
+// @typedef {{ userId: string, contextId: string|null }} Tenant
+
+function assertTenant(tenant, fn) {
+  if (!tenant || typeof tenant.userId !== 'string' || !tenant.userId) {
+    throw new TypeError(
+      `vectorStore.${fn}: tenant.userId is required. Every Qdrant operation is ` +
+      `tenant-scoped — see docs/planning/v2/phase_6_tenancy_and_contexts.md §2.`,
+    );
+  }
+  if (tenant.contextId !== null && typeof tenant.contextId !== 'string') {
+    throw new TypeError(`vectorStore.${fn}: tenant.contextId must be a string or null.`);
+  }
+  return tenant;
+}
+
+// The one place a tenant becomes a Qdrant filter. `contextId: null` is a DELIBERATE,
+// explicit widening to "every context this user owns" — used only by the migration
+// script's verification count. It is not a default; a caller must pass null on purpose,
+// and `assertTenant` still requires userId.
+function tenantConditions({ userId, contextId }) {
+  const must = [{ key: 'userId', match: { value: userId } }];
+  if (contextId !== null && contextId !== undefined) {
+    must.push({ key: 'contextId', match: { value: contextId } });
+  }
+  return must;
+}
+
+// Always returns a filter object — never `undefined`. v1's document-scope-only helper
+// returned `undefined` when no document scope was given, and `undefined` passed to Qdrant
+// means "no filter" — an unscoped search. Under tenancy there is no such thing as an
+// unfiltered query, so that helper is deleted outright, not merely widened.
+function scopedFilter(tenant, documentIds = null) {
+  const must = tenantConditions(tenant);
+  if (documentIds?.length) must.push({ key: 'documentId', match: { any: documentIds } });
+  return { must };
+}
+
 // ── Collection schema (architecture §4, phase 1 §4) ─────────────────────────
 
 const CHUNKS_SCHEMA = {
@@ -78,7 +122,17 @@ const PAGES_SCHEMA = {
   },
 };
 
-const PAYLOAD_INDEXES = ['documentId', 'contentHash'];
+// Phase 6 §3.1: `is_tenant` tells Qdrant this field partitions the data. It physically
+// groups a tenant's points into contiguous segments, so a filtered search reads FEWER
+// segments than an unfiltered one — the filter makes retrieval faster, not slower. This is
+// the single reason a shared collection beats collection-per-tenant at this scale
+// (architecture §5).
+const PAYLOAD_INDEXES = [
+  { field_name: 'userId', field_schema: { type: 'keyword', is_tenant: true } },
+  { field_name: 'contextId', field_schema: 'keyword' },
+  { field_name: 'documentId', field_schema: 'keyword' },
+  { field_name: 'contentHash', field_schema: 'keyword' },
+];
 
 // Compares only the fields that determine correctness (dimension, distance, multivector
 // comparator, quantization type, sparse modifier). A mismatch here means points would be
@@ -163,8 +217,9 @@ export async function ensureCollections() {
   const pages = await ensureCollection(config.qdrant.pagesCollection, PAGES_SCHEMA);
 
   for (const collection of [config.qdrant.chunksCollection, config.qdrant.pagesCollection]) {
-    for (const field of PAYLOAD_INDEXES) {
-      await client().createPayloadIndex(collection, { field_name: field, field_schema: 'keyword' });
+    for (const { field_name, field_schema } of PAYLOAD_INDEXES) {
+      // createPayloadIndex is idempotent, so npm run setup:qdrant remains safe to re-run.
+      await client().createPayloadIndex(collection, { field_name, field_schema });
     }
   }
 
@@ -178,14 +233,19 @@ export async function ensureCollections() {
 // same document must land on the same point ids every time (task 2.14).
 const NAMESPACE = 'bd3ef651-79c8-48e5-811d-5f151ecd9b2c';
 
-export async function upsertChunks(chunks, denseVectors, sparseVectors) {
+export async function upsertChunks(tenant, chunks, denseVectors, sparseVectors) {
+  assertTenant(tenant, 'upsertChunks');
   const points = chunks.map((chunk, i) => ({
     // Deterministic UUIDv5 from (documentId, position). Re-ingesting the same document
     // overwrites the same point ids instead of duplicating — this is what makes
     // FR-DOC-03 (re-ingest replaces) work without a delete-then-insert race.
     id: uuidv5(`${chunk.documentId}:${chunk.position}`, NAMESPACE),
     vector: { dense: denseVectors[i], sparse: sparseVectors[i] },
-    payload: chunk,
+    // Phase 6 §3.2: userId/contextId stored as strings, not Mongo ObjectIds — the Qdrant
+    // client serializes an ObjectId to an opaque object and the keyword index would never
+    // match it. This is a silent-failure risk (writes succeed, reads return nothing), so
+    // it is stated here at the one place these fields enter every point's payload.
+    payload: { ...chunk, userId: tenant.userId, contextId: tenant.contextId },
   }));
 
   for (let i = 0; i < points.length; i += 256) {
@@ -197,35 +257,35 @@ export async function upsertChunks(chunks, denseVectors, sparseVectors) {
   }
 }
 
-export async function deleteByDocument(documentId) {
+// `deleteByDocument` taking a tenant is not redundant with `documentId`. A delete-by-filter
+// with only `documentId` would, given a guessed or leaked id, delete another tenant's
+// points. The tenant condition makes a cross-tenant delete a no-op that reports zero rather
+// than a successful attack.
+export async function deleteByDocument(tenant, documentId) {
+  assertTenant(tenant, 'deleteByDocument');
+  const filter = scopedFilter(tenant, [documentId]);
+
   const before = await client().count(config.qdrant.chunksCollection, {
-    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
-    exact: true,
+    filter, exact: true,
   }).catch(() => ({ count: 0 }));   // collection may not exist yet on a very first call
 
   await qdrantOpBreaker.fire(() => client().delete(config.qdrant.chunksCollection, {
-    wait: true,
-    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    wait: true, filter,
   }));
 
   return { deletedPoints: before.count };
 }
 
-export async function countByDocument(documentId) {
+export async function countByDocument(tenant, documentId) {
+  assertTenant(tenant, 'countByDocument');
   const { count } = await client().count(config.qdrant.chunksCollection, {
-    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    filter: scopedFilter(tenant, [documentId]),
     exact: true,
   });
   return count;
 }
 
 // ── Phase 3: hybrid retrieval ─────────────────────────────────────────────────
-
-function documentIdFilter(documentIds) {
-  return documentIds?.length
-    ? { must: [{ key: 'documentId', match: { any: documentIds } }] }
-    : undefined;
-}
 
 // Server-side fusion via Qdrant's Query API (phase 3 §3.1) — one HTTP round trip fuses
 // the dense and sparse branches with RRF, deleting the hand-rolled RRF loop the legacy
@@ -245,8 +305,14 @@ function documentIdFilter(documentIds) {
 // 1 (a deliberate cost accepted for honest attribution, not an oversight) — all three are
 // sub-30ms ANN/lookup queries against the same warm collection, negligible next to the
 // ~240ms rerank stage that follows.
-export async function hybridQuery({ denseVector, sparseVector, limit, documentIds = null }) {
-  const filter = documentIdFilter(documentIds);
+//
+// Phase 6 §2.4: the filter — now carrying the tenant conditions folded in — is applied at
+// the SAME PREFETCH_LIMIT to every one of these five Qdrant calls (2 prefetch branches +
+// top level + 2 membership queries). A membership set drawn at a different scope than the
+// fused query would attribute branches to the wrong results.
+export async function hybridQuery(tenant, { denseVector, sparseVector, limit, documentIds = null }) {
+  assertTenant(tenant, 'hybridQuery');
+  const filter = scopedFilter(tenant, documentIds);
 
   const [fused, denseOnly, sparseOnly] = await Promise.all([
     qdrantOpBreaker.fire(() => client().query(config.qdrant.chunksCollection, {
@@ -304,9 +370,10 @@ export async function hybridQuery({ denseVector, sparseVector, limit, documentId
 // Total chunk count, optionally scoped to a set of documents — used by search.js to
 // distinguish "you have no documents" (empty_corpus) from "your documents don't cover
 // this" (no_relevant_matches), phase 3 §5.2.
-export async function countPoints(documentIds = null) {
+export async function countPoints(tenant, documentIds = null) {
+  assertTenant(tenant, 'countPoints');
   const { count } = await client().count(config.qdrant.chunksCollection, {
-    filter: documentIdFilter(documentIds),
+    filter: scopedFilter(tenant, documentIds),
     exact: true,
   });
   return count;
@@ -323,12 +390,14 @@ export async function countPoints(documentIds = null) {
 // written would have re-run a health ping instead of the real upsert.)
 const qdrantPagesBreaker = wrap('qdrant.pages', (fn) => fn(), { timeout: 5_000 });
 
-export async function upsertPages(pages, documentId, fileName) {
+export async function upsertPages(tenant, pages, documentId, fileName) {
+  assertTenant(tenant, 'upsertPages');
   const points = pages.map((p) => ({
     id: uuidv5(`${documentId}:page:${p.page}`, NAMESPACE),
     vector: { colpali: p.multivector },      // list-of-lists → Qdrant multivector
     payload: {
       documentId, fileName, page: p.page,
+      userId: tenant.userId, contextId: tenant.contextId,
       imageUri: p.imageUri, widthPx: p.widthPx, heightPx: p.heightPx,
       ocrText: p.ocrText.slice(0, 8000),     // payload preview; the chunked copy is authoritative
       ocrQuality: p.ocrQuality, meanConfidence: p.meanConfidence,
@@ -350,8 +419,9 @@ export async function upsertPages(pages, documentId, fileName) {
 // applies MAX_SIM automatically for a `multivector_config` field when the query itself is
 // a list of vectors (the PAGES_SCHEMA `colpali` field above) — no `fusion` parameter is
 // needed since there is only one vector field to query here, unlike hybridQuery's two.
-export async function multivectorQuery({ queryMultivector, limit, documentIds = null }) {
-  const filter = documentIdFilter(documentIds);
+export async function multivectorQuery(tenant, { queryMultivector, limit, documentIds = null }) {
+  assertTenant(tenant, 'multivectorQuery');
+  const filter = scopedFilter(tenant, documentIds);
 
   const res = await qdrantPagesBreaker.fire(() => client().query(config.qdrant.pagesCollection, {
     query: queryMultivector,
@@ -374,23 +444,80 @@ export async function multivectorQuery({ queryMultivector, limit, documentIds = 
   }));
 }
 
-export async function deletePagesByDocument(documentId) {
+export async function deletePagesByDocument(tenant, documentId) {
+  assertTenant(tenant, 'deletePagesByDocument');
+  const filter = scopedFilter(tenant, [documentId]);
+
   const before = await client().count(config.qdrant.pagesCollection, {
-    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
-    exact: true,
+    filter, exact: true,
   }).catch(() => ({ count: 0 }));   // collection may not exist yet on a very first call
 
   await qdrantPagesBreaker.fire(() => client().delete(config.qdrant.pagesCollection, {
-    wait: true,
-    filter: { must: [{ key: 'documentId', match: { value: documentId } }] },
+    wait: true, filter,
   }));
 
   return { deletedPoints: before.count };
 }
 
-// Total page count — /health's `collections` field (phase 6 §7.1), the twin of
-// countPoints() above for the pages collection.
-export async function countPagePoints() {
+// Tenant-scoped total, used only by the migration script's verification step (§7.1 step
+// 6) — pass `{ userId, contextId: null }` there to widen to every context the bootstrap
+// user owns.
+export async function countPagePoints(tenant) {
+  assertTenant(tenant, 'countPagePoints');
+  const { count } = await client().count(config.qdrant.pagesCollection, {
+    filter: { must: tenantConditions(tenant) },
+    exact: true,
+  });
+  return count;
+}
+
+// ── Phase 6 §6.1: the cascade primitives ────────────────────────────────────────────
+//
+// Both take a tenant whose `contextId` must be a real string, not the `null` widening
+// `tenantConditions` otherwise allows — deleting "every context this user owns" is never
+// what a context-delete cascade means, so that specific misuse is rejected here rather
+// than left to `assertTenant`'s weaker "string or null" check.
+function assertConcreteContext(tenant, fn) {
+  assertTenant(tenant, fn);
+  if (!tenant.contextId) {
+    throw new TypeError(`vectorStore.${fn}: tenant.contextId must be a non-null context id.`);
+  }
+}
+
+export async function deleteByContext(tenant) {
+  assertConcreteContext(tenant, 'deleteByContext');
+  const filter = { must: tenantConditions(tenant) };
+  await qdrantOpBreaker.fire(() => client().delete(config.qdrant.chunksCollection, {
+    wait: true, filter,
+  }));
+}
+
+// Named and guarded separately from `deleteByContext` above (which only ever touches
+// `cerebro_chunks`, per that function's own comment) — the cascade (§6.1 step 3) deletes
+// the pages collection as its own ordered step, against its own breaker.
+export async function deletePagesByContext(tenant) {
+  assertConcreteContext(tenant, 'deletePagesByContext');
+  const filter = { must: tenantConditions(tenant) };
+  await qdrantPagesBreaker.fire(() => client().delete(config.qdrant.pagesCollection, {
+    wait: true, filter,
+  }));
+}
+
+// ── Infra-only, cross-tenant totals — /health (phase 1 §8, phase 6 §7.1) ────────────
+//
+// Deliberately NOT part of the tenant-guarded surface above and deliberately NOT named
+// `countPoints`/`countPagePoints` (which are now tenant-required). /health reports the
+// whole deployment's collection sizes for operators — a single integer, never any
+// document content or per-tenant breakdown — so it carries no cross-tenant leak despite
+// running with no tenant filter. `assertTenant` is intentionally not called here; these
+// two functions are the one place in this module a Qdrant count runs unscoped, and that
+// is by design, not an oversight — see phase_6_tenancy_and_contexts.md's amendment note.
+export async function countAllPoints() {
+  const { count } = await client().count(config.qdrant.chunksCollection, { exact: true });
+  return count;
+}
+
+export async function countAllPagePoints() {
   const { count } = await client().count(config.qdrant.pagesCollection, { exact: true });
   return count;
 }

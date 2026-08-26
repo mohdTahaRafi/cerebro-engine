@@ -4,13 +4,13 @@
 import { Message } from '../models/Message.js';
 import { Conversation } from '../models/Conversation.js';
 
-export async function persistTurn(conversationId, userQuery, final) {
+export async function persistTurn(conversationId, userId, userQuery, final) {
   await Message.create({
-    conversationId, role: 'user', content: userQuery,
+    conversationId, userId, role: 'user', content: userQuery,
     condensedQuery: final.condensedQuery ?? null,
   });
   await Message.create({
-    conversationId, role: 'assistant', content: final.answer,
+    conversationId, userId, role: 'assistant', content: final.answer,
     sources: final.sources.map((s) => ({
       kind: s.kind === 'page' ? 'page' : 'chunk',
       pointId: s.pointId, documentId: s.documentId, page: s.page ?? null, score: s.score,

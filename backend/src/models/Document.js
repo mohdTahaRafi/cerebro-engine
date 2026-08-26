@@ -1,10 +1,13 @@
 import mongoose from 'mongoose';
 
 const DocumentSchema = new mongoose.Schema({
+  // Phase 6 §4.2: every document belongs to exactly one user and one context.
+  userId:       { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  contextId:    { type: mongoose.Schema.Types.ObjectId, ref: 'Context', required: true },
   fileName:     { type: String, required: true },
   mimeType:     { type: String, required: true },
   sizeBytes:    { type: Number, required: true },
-  contentHash:  { type: String, required: true, index: true },  // sha256 of raw bytes
+  contentHash:  { type: String, required: true },  // sha256 of raw bytes
   storagePath:  { type: String, required: true },
   status: {
     type: String,
@@ -26,7 +29,16 @@ const DocumentSchema = new mongoose.Schema({
   warnings:     { type: [String], default: [] },
 }, { timestamps: true });
 
-DocumentSchema.index({ createdAt: -1 });
-DocumentSchema.index({ fileName: 'text' });   // powers FR-DOC-04 list filtering
+// Phase 6 §4.2: every list query is (userId, contextId, createdAt desc); the v1
+// {contentHash} index becomes {userId, contextId, contentHash} — duplicate detection is
+// now scoped to a tenant's own context (§4.3), so the index that backs it must be too.
+DocumentSchema.index({ userId: 1, contextId: 1, createdAt: -1 });
+DocumentSchema.index({ userId: 1, contextId: 1, contentHash: 1 });
+
+// The v1 `{ fileName: 'text' }` index is DROPPED (phase 6 §4.2): a text index is global
+// to the collection and cannot be composed with a tenant equality prefix, so it would
+// scan every tenant's filenames and then filter. Filename search moves to a
+// case-insensitive regex over the already tenant-scoped result set (documents.js), which
+// at per-tenant document counts (hundreds, not millions) is faster as well as safer.
 
 export const Document = mongoose.model('Document', DocumentSchema);

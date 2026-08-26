@@ -1,14 +1,15 @@
 // phase_4 §1.2 — dev-only demo data for /admin/traces and /admin/traces/:id, active only
 // under VITE_API_MOCK=1 (src/api/mock/index.ts). Real trace history is Phase 7. Generated
-// deterministically per real context id (mock/fixtures/contexts.ts) with a seeded PRNG
-// rather than persisted to localStorage — this is read-only inspection data over queries
-// that never actually ran, so there is nothing to "keep" across a reload the way a real
-// context or document would need to be.
+// deterministically per demo context id (mock/fixtures/demoContexts.ts — small and fixed,
+// unrelated to any real user's contexts since Phase 6 gave Contexts a real backend) with a
+// seeded PRNG rather than persisted to localStorage — this is read-only inspection data
+// over queries that never actually ran, so there is nothing to "keep" across a reload the
+// way a real context or document would need to be.
 import type {
   TraceSummary, TraceDetail, PipelineTelemetry, ProvenanceSource, TracePromptBlock,
   SourceBranch,
 } from '../../contracts';
-import { list as listContexts } from './contexts';
+import { DEMO_CONTEXTS } from './demoContexts';
 
 const TRACES_PER_CONTEXT = 9;
 const RELEVANCE_FLOOR = 0.15; // fixture-only illustrative value — see contracts.ts's
@@ -218,7 +219,7 @@ function generateForContext(contextId: string, contextTitle: string): GeneratedT
 }
 
 function allGenerated(): GeneratedTrace[] {
-  return listContexts().flatMap((c) => generateForContext(c.id, c.title));
+  return DEMO_CONTEXTS.flatMap((c) => generateForContext(c.id, c.title));
 }
 
 export function list(params: { contextId?: string; window?: '1h' | '24h' | '7d' | 'all' }): TraceSummary[] {

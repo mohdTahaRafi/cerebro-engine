@@ -17,7 +17,6 @@ import {
 import { DocumentRow } from './DocumentRow';
 import { UploadQueueRow } from './UploadQueue';
 import { DeleteDocumentDialog } from './DeleteDocumentDialog';
-import { MockBadge } from '../design/MockBadge';
 import type { OptimisticRow } from '../../hooks/useUploadQueue';
 import type { DocumentRecord } from '../../../api/contracts';
 
@@ -171,9 +170,6 @@ export function DocumentTable({ contextTitle, documents, optimisticRows, onChang
             Delete {selected.size} selected
           </Button>
         )}
-        {/* §7.4 point 1 — labels the client-side doc→context assignment this table's rows
-            are filtered by, so the limitation can't survive by accident. */}
-        <MockBadge force className="ml-auto" title="Context assignment is local to this browser." />
       </div>
 
       <div aria-live="polite" className="sr-only">{announcement}</div>

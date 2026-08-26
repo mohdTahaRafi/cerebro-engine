@@ -7,7 +7,7 @@ export async function retrieveNode(state) {
   const query = state.condensedQuery ?? state.query;
   const t0 = performance.now();
 
-  const { candidates, timings, candidatesRetrieved, candidatesAfterMerge } = await retrieveCandidates(query, {
+  const { candidates, timings, candidatesRetrieved, candidatesAfterMerge } = await retrieveCandidates(state.tenant, query, {
     documentIds: state.scopeDocumentIds,
   });
 

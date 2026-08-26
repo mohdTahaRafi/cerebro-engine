@@ -2,14 +2,13 @@
 // production builds entirely (api/index.ts's MOCK_ON constant fold).
 //
 // Amended phase_2: `contexts` and `documents` are NO LONGER special-cased here. Phase 1
-// mocked them as a temporary bridge ("ahead of Phase 2's real routes"); now that Phase 2
-// has landed, `endpoints/contexts.ts` is itself always a local, localStorage-backed
-// adapter (regardless of this dev flag — see that file's header), and
-// `endpoints/documents.ts` always hits the real backend. Re-mocking either here would mean
-// two competing sources of truth for the same data. Both are passed through unchanged,
-// exactly like threads/chat/health below. `traces`/`vectors`/`admin` are different (phase_4
-// §1.2): those backend routes do not exist AT ALL until Phase 7, so passing them through
-// would just mean every call 404s — they are backed by fixtures instead, defined below.
+// mocked them as a temporary bridge ("ahead of Phase 2's real routes"); Phase 2 landed
+// `documents` against the real backend, and Phase 6 landed a real Context model
+// (backend/src/models/Context.js) — `endpoints/contexts.ts` now always hits the real
+// backend too, exactly like documents/threads/chat/health below. `traces`/`vectors`/
+// `admin` are different (phase_4 §1.2): those backend routes do not exist AT ALL until
+// Phase 7, so passing them through would just mean every call 404s — they are backed by
+// fixtures instead, defined below.
 //
 // Amended phase_5: `auth` is NO LONGER special-cased here either, for the exact same reason
 // contexts/documents stopped being in phase_2 — the real backend routes now exist

@@ -13,6 +13,7 @@ import { classify } from './errors.js';
 import { recordUsage } from '../telemetry/usage.js';
 import { ingestJobDuration } from '../telemetry/metrics.js';
 import { config } from '../config/index.js';
+import { recomputeContextCounters } from '../contexts/counters.js';
 
 // Keeps BullMQ's own job.progress (internal queue bookkeeping) and the Document row's
 // `progress` field (what GET /api/documents/:id and :id/status actually serve to the
@@ -91,6 +92,9 @@ export async function ingestDocumentJob(job) {
   const jobT0 = performance.now();
   const doc = await Document.findById(documentId);
   if (!doc) throw new UnrecoverableError(`Document ${documentId} no longer exists`);
+  // Phase 6 §2: every Document row carries userId/contextId from creation onward
+  // (routes/contexts.js), so the tenant is always resolvable here, before any Qdrant call.
+  const tenant = { userId: String(doc.userId), contextId: String(doc.contextId) };
 
   try {
     await doc.updateOne({ status: 'processing', progress: 5, error: null, warnings: [] });
@@ -173,7 +177,7 @@ export async function ingestDocumentJob(job) {
         embeddings.encodeSparse(texts),
       ]);
       totalTokens = tokens;
-      await vectorStore.upsertChunks(chunks, dense, sparse);
+      await vectorStore.upsertChunks(tenant, chunks, dense, sparse);
     }
     await updateProgress(doc, job, 95);
 
@@ -186,13 +190,14 @@ export async function ingestDocumentJob(job) {
     // Qdrant, and writing an empty list would create points that can never match.
     const embeddablePages = visualResults.filter((p) => Array.isArray(p.multivector) && p.multivector.length > 0);
     if (embeddablePages.length > 0) {
-      await vectorStore.upsertPages(embeddablePages, doc._id.toString(), doc.fileName);
+      await vectorStore.upsertPages(tenant, embeddablePages, doc._id.toString(), doc.fileName);
     }
 
     await doc.updateOne({ status: 'ready', progress: 100, chunkCount: chunks.length, error: null });
     if (totalTokens > 0) {
       await recordUsage({ provider: 'cohere', operation: 'embed', inputTokens: totalTokens, documentId });
     }
+    await recomputeContextCounters(doc.contextId);
     ingestJobDuration.observe({ outcome: 'success' }, (performance.now() - jobT0) / 1000);
   } catch (err) {
     // Atomicity (NFR-REL-03): remove every trace before recording the failure, so a
@@ -205,7 +210,7 @@ export async function ingestDocumentJob(job) {
     // own rollback call — once the dependency is reachable again — deletes whatever the
     // first attempt left behind.
     try {
-      await rollbackDocument(documentId);
+      await rollbackDocument(tenant, documentId);
     } catch (rollbackErr) {
       console.warn(`[ingest] rollback for ${documentId} failed (will retry on next attempt if transient):`, rollbackErr.message);
     }

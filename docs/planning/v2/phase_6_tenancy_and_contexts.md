@@ -601,3 +601,44 @@ frontend/src/api/
 | Cascade, 50 documents | Worker log timestamps | < 20 s |
 | Qdrant migration backfill | Script output, 12k points | < 60 s at batch size 512 |
 | Ingest with tenant payloads | `cerebro_ingest_job_duration_seconds` | unchanged from v1 — two extra payload keys per point are noise |
+
+---
+
+## 14. Amendments (recorded during implementation, 2026-08-27)
+
+Per CLAUDE.md §7.4, the spec is the source of truth and must not silently drift from the
+shipped code. Three deviations from §2.3's exact text, decided and documented rather than
+punted:
+
+1. **`deletePagesByContext(tenant)` is an eleventh guarded function, not listed in §2.3's
+   "new signatures" table.** §6.1's own cascade steps 2-3 already call it by name
+   (`vectorStore.deleteByContext(tenant)` for `cerebro_chunks`, then
+   `vectorStore.deletePagesByContext(tenant)` for `cerebro_pages`) — §2.3's list simply
+   omitted it. It is tenant-guarded identically to `deleteByContext`, including the
+   stricter "`contextId` must be a non-null string" check neither `assertTenant` nor
+   §2.3 states explicitly: a context-delete cascade with a widened `contextId: null`
+   would delete every context the user owns, not the one being deleted. Both `filterInjection.test.js` and `cascade.js` treat it as load-bearing, not incidental.
+
+2. **`countAllPoints()` / `countAllPagePoints()` — two deliberately UNGUARDED, cross-tenant
+   count functions, added to `vectorStore.js` and not in §2.3's list at all.** `GET
+   /health` (phase 1 §8) reports whole-deployment collection sizes for operators — before
+   this phase it called the then-unscoped `countPoints()`/`countPagePoints()`. Once those
+   two became tenant-required (§2.3 lists both), `/health`'s legitimate cross-tenant use
+   case had no function left to call. Minting a third pair of names, explicitly excluded
+   from `assertTenant` and named so they cannot be confused with the guarded pair, keeps
+   the "every Qdrant operation is tenant-scoped" claim intact for anything that returns
+   document content while giving infra monitoring — which returns only a single integer,
+   never content, never a per-tenant breakdown — a legitimate way to stay unscoped.
+   `filterInjection.test.js`'s `UNGUARDED_ALLOWLIST` enumerates these by name specifically
+   so a future contributor adding a new query function still can't slip past the guard
+   silently — only these two pre-approved exceptions are exempt.
+
+3. **The migration's verification (§7.1 step 6) compares against the pre-migration
+   collection-wide total captured before any write, not `countPoints({userId,
+   contextId: null})` computed fresh at verify time.** The two are equal on a first run
+   against a genuinely single-tenant legacy corpus (the case §7 describes), but an exact
+   pre/post comparison is only meaningful if "pre" is captured before the run mutates
+   anything — computing it post-hoc from the same widened query the verification itself
+   uses would make the check tautological. `migrate-to-tenancy.js` captures both chunk and
+   page collection totals via `countAllPoints()`/`countAllPagePoints()` (amendment 2,
+   above) at the very start, then asserts exact equality against them after the backfill.

@@ -5,9 +5,10 @@
 // the public reverse proxy. It carries operational detail (per-provider call/token
 // volumes, breaker state) that does not belong on the public interface.
 import express from 'express';
-import { registry, breakerState, queueDepth, BREAKER_STATE_VALUE } from '../../telemetry/metrics.js';
+import { registry, breakerState, queueDepth, BREAKER_STATE_VALUE, activeTenants } from '../../telemetry/metrics.js';
 import { breakerStates } from '../../providers/breaker.js';
 import { ingestQueue } from '../../ingestion/queue.js';
+import { countActiveTenants } from '../../telemetry/activity.js';
 
 const router = express.Router();
 
@@ -23,6 +24,7 @@ router.get('/metrics', async (req, res, next) => {
     for (const [state, count] of Object.entries(counts)) {
       queueDepth.set({ state }, count);
     }
+    activeTenants.set(await countActiveTenants());
 
     res.set('Content-Type', registry.contentType);
     res.end(await registry.metrics());

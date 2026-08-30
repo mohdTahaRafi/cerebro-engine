@@ -1,6 +1,7 @@
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { config } from '../../config/index.js';
 import { resolveIdentity } from '../linking.js';
+import { authOutcomes } from '../../telemetry/metrics.js';
 
 // Normalized profile — the only shape the rest of the codebase sees.
 function normalizeGoogle(profile) {
@@ -38,7 +39,11 @@ export function registerGoogleStrategy(passport) {
   }, async (accessToken, refreshToken, profile, done) => {
     try {
       const result = await resolveIdentity(normalizeGoogle(profile));
-      if (!result.ok) return done(null, false, { code: result.code });
+      if (!result.ok) {
+        authOutcomes.inc({ method: 'google', outcome: 'invalid' });
+        return done(null, false, { code: result.code });
+      }
+      authOutcomes.inc({ method: 'google', outcome: result.linked ? 'linked' : 'success' });
       return done(null, result.user);
     } catch (err) {
       return done(err);

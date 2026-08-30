@@ -160,6 +160,7 @@
   --color-signal-soft:        var(--signal-soft);
   --color-signal-soft-line:   var(--signal-soft-line);
   --color-signal-on:          var(--signal-on);
+  --color-signal-ring:        var(--signal-ring);
   --color-positive:           var(--positive);
   --color-positive-text:      var(--positive-text);
   --color-positive-soft:      var(--positive-soft);

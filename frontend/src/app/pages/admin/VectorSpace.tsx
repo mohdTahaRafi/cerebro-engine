@@ -150,7 +150,7 @@ export function VectorSpace() {
   if (status === 'unavailable') {
     return (
       <div className="p-8">
-        <Unavailable reason="Vector projections are computed from Phase 7." />
+        <Unavailable reason="Vector projections aren't available right now." />
       </div>
     );
   }

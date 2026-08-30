@@ -124,6 +124,17 @@ export const config = {
     accountSid: process.env.TWILIO_ACCOUNT_SID, authToken: process.env.TWILIO_AUTH_TOKEN,
     from: process.env.TWILIO_FROM,
   },
+
+  // Phase 8 §3.3: the quota a rate limit does not cover — a user can stay under
+  // uploadLimiter's 10/hour indefinitely and still fill the disk. Every default here
+  // matches .env.example; each is a config value, not a hardcoded constant, so an
+  // operator can raise or lower it without a code change.
+  quotas: {
+    maxDocumentsPerContext: Number(process.env.MAX_DOCUMENTS_PER_CONTEXT ?? 500),
+    maxContextsPerUser: Number(process.env.MAX_CONTEXTS_PER_USER ?? 50),
+    maxStorageBytesPerUser: Number(process.env.MAX_STORAGE_BYTES_PER_USER ?? 5_368_709_120), // 5 GiB
+    maxChunksPerUser: Number(process.env.MAX_CHUNKS_PER_USER ?? 500_000),
+  },
 };
 
 // Provider-conditional validation: whichever LLM path is selected needs its key.

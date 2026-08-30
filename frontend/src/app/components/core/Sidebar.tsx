@@ -226,10 +226,12 @@ export function Sidebar() {
   // A turn finishing streaming means a brand-new thread's title/lastMessageAt may have
   // just appeared — refetch on the isGenerating true→false edge, driven off the same
   // EngineContext the Chat page reads, so the two stay in sync without a direct callback.
+  // `force: true` bypasses useThreads' cross-remount cache (see its own comment) — this
+  // is exactly the "a real change happened" case that cache is not allowed to shadow.
   useEffect(() => {
-    if (wasGenerating.current && !isGenerating) refetch();
+    if (wasGenerating.current && !isGenerating) void fetchThreads(activeContext?.id, { force: true });
     wasGenerating.current = isGenerating;
-  }, [isGenerating, refetch]);
+  }, [isGenerating, fetchThreads, activeContext?.id]);
 
   const visible = [...threads]
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
@@ -241,7 +243,10 @@ export function Sidebar() {
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     await deleteThread(deleteTarget._id);
-    if (activeThreadId === deleteTarget._id) navigate('/chat');
+    // Bug #2/#3 fix: `state: { newChat: true }` is the explicit signal useTranscript
+    // resets on — a bare `navigate('/chat')` is no longer treated as one (see
+    // useTranscript.ts), since the deleted thread no longer exists to resume.
+    if (activeThreadId === deleteTarget._id) navigate('/chat', { state: { newChat: true } });
     setDeleteTarget(null);
   };
 
@@ -258,7 +263,7 @@ export function Sidebar() {
       <div className="px-4 pt-5">
         <button
           type="button"
-          onClick={() => navigate('/chat')}
+          onClick={() => navigate('/chat', { state: { newChat: true } })}
           className="flex w-full items-center gap-2.5 rounded-lg bg-signal-soft px-3.5 py-2.5 text-sm font-medium text-signal outline-none transition-colors hover:bg-signal-soft-line focus-visible:ring-[3px] focus-visible:ring-signal-ring"
         >
           <Plus className="size-[18px]" aria-hidden="true" />
@@ -281,7 +286,7 @@ export function Sidebar() {
         <div className="flex items-center justify-between px-1 pb-1.5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-graphite">Recent chats</span>
           {activeContext && (
-            <span className="max-w-[120px] truncate text-[11px] text-graphite-faint" title={`Filtered to ${activeContext.title}`}>
+            <span className="max-w-[120px] truncate text-[11px] text-graphite" title={`Filtered to ${activeContext.title}`}>
               {activeContext.title}
             </span>
           )}
@@ -289,7 +294,7 @@ export function Sidebar() {
         <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto">
           {grouped.map(([group, items]) => (
             <div key={group} className="flex flex-col gap-0.5">
-              <div className="px-2.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-graphite-faint">{group}</div>
+              <div className="px-2.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-graphite">{group}</div>
               {items.map((t) => (
                 <ThreadRow
                   key={t._id}

@@ -24,30 +24,51 @@ import vectorsRouter from './routes/vectors.js';
 import adminRouter from './routes/admin.js';
 import { sessionMiddleware } from '../auth/session.js';
 import { passport } from '../auth/passport.js';
+import { issueCsrfToken, requireCsrf } from './middleware/csrf.js';
 import authRouter from './routes/auth.js';
 import passwordRouter from './routes/password.js';
 import { startWorker } from '../ingestion/queue.js';
 import { startContextDeleteWorker } from '../contexts/queue.js';
 import { startProjectionWorker } from '../projection/worker.js';
 import { registerGracefulShutdown } from '../shutdown.js';
+import { assertNoEvictionPolicy } from '../redis.js';
 
 const app = express();
 const PORT = config.port;
 
-// Phase 6 §6.2. `contentSecurityPolicy`'s default `img-src 'self'` already covers
-// /api/pages/... — Caddy serves the SPA and proxies /api/* under one public origin
-// (Caddyfile's single `handle /api/*` block, amended §16.6: NOT `handle_path`, which
-// strips the /api prefix the backend's routes require intact), so a page image request is
-// same-origin from the browser's perspective. The only addition needed is `data:`, since
-// the frontend's own bundled assets/icons include a few data-URI images.
+// Phase 8 §3.2: the tightened policy, superseding Phase 6's helmet defaults. This
+// covers the API surface Express itself serves (JSON error pages, a direct hit on
+// /api/*) — the SAME directive values are also sent by Caddy on the actual SPA
+// document (Caddyfile, §4.1), because Caddy — not this Express process — is what
+// serves index.html and the built JS/CSS in production; a CSP header on a JSON
+// response never reaches the page the browser renders. Keeping both in sync is a
+// deliberate duplication, not drift: see Caddyfile's own header comment.
+const CSP_DIRECTIVES = {
+  'default-src': ["'self'"],
+  'img-src':     ["'self'", 'data:', 'https://lh3.googleusercontent.com',
+                                     'https://avatars.githubusercontent.com'],
+  'font-src':    ["'self'", 'https://fonts.gstatic.com'],
+  'style-src':   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+  'script-src':  ["'self'"],
+  'connect-src': ["'self'"],
+  'frame-ancestors': ["'none'"],
+  'object-src':  ["'none'"],
+  'base-uri':    ["'self'"],
+  'form-action': ["'self'"],
+};
+
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      'img-src': ["'self'", 'data:'],
-    },
-  },
+  contentSecurityPolicy: { directives: CSP_DIRECTIVES },
+  // Strict-Transport-Security (max-age 1 year, includeSubDomains) is helmet's default
+  // when contentSecurityPolicy is configured; hsts below just makes the value explicit.
+  hsts: { maxAge: 365 * 24 * 60 * 60, includeSubDomains: true },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+// helmet does not ship a Permissions-Policy directive itself; set it directly.
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 app.use(cors(buildCorsOptions(config.nodeEnv, process.env.CORS_ALLOWED_ORIGINS)));
 
@@ -63,6 +84,12 @@ app.use(express.json({ limit: '256kb' }));
 // Phase 5's routes work without `req.session` existing.
 app.use(sessionMiddleware);
 app.use(passport.initialize());
+
+// Phase 8 §3.1: the double-submit CSRF token. issueCsrfToken must run before
+// requireCsrf (it is what populates req.session.csrf for the comparison below) and
+// before every router, so even a session-less visitor's first request mints the cookie.
+app.use(issueCsrfToken);
+app.use(requireCsrf);
 
 // Phase 6 §7.2: cerebro_request_duration_seconds, recorded around every route regardless
 // of outcome — `res.on('finish', ...)` fires whether the handler resolved normally, threw
@@ -126,6 +153,7 @@ mongoose.connect(config.mongo.uri)
                 if (bindFailed) return;
                 console.log(`[CEREBRO] Backend Online at http://localhost:${PORT}`);
                 console.log(`[CEREBRO] C++ SIMD Core: ACTIVE`);
+                assertNoEvictionPolicy();
                 const worker = startWorker();
                 console.log('[CEREBRO] Ingest worker started (concurrency 2)');
                 // Phase 6 §6.2: a second, separate BullMQ worker for the context-delete

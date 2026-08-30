@@ -54,7 +54,7 @@ export function Turn({
           </Avatar>
           <p className="text-sm leading-relaxed text-ink">{question}</p>
         </div>
-        <span className="pr-1 text-[11px] text-graphite-faint">{timestamp}</span>
+        <span className="pr-1 text-[11px] text-graphite">{timestamp}</span>
       </div>
 
       {/* Answer body */}
@@ -102,7 +102,7 @@ export function Turn({
         ) : refused ? (
           <div className="flex flex-col gap-2 pl-6">
             <p className="text-sm leading-relaxed text-graphite">{answer}</p>
-            <p className="flex items-center gap-1.5 text-xs text-graphite-faint">
+            <p className="flex items-center gap-1.5 text-xs text-graphite">
               <Sparkles className="size-3.5 shrink-0" aria-hidden="true" />
               Try widening your question, or add a document that covers this topic.
             </p>

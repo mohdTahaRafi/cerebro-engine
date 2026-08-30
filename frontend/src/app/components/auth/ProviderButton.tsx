@@ -31,12 +31,14 @@ const PROVIDER_META = {
 
 export function ProviderButton({
   provider,
-  action = 'Sign in',
+  action = 'Continue',
   className,
 }: {
   provider: 'google' | 'github';
-  /** "Sign in" on /login, "Sign up" on /signup — same button, page-appropriate verb. */
-  action?: 'Sign in' | 'Sign up';
+  /** OAuth is Login-only (Signup is email/password only) — "Continue" is the only verb
+   * this renders today. Left as a prop, not hardcoded, so a future call site can still
+   * override it without touching this component. */
+  action?: 'Sign in' | 'Sign up' | 'Continue';
   className?: string;
 }) {
   const { label, Icon } = PROVIDER_META[provider];

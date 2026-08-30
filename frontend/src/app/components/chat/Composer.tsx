@@ -152,7 +152,7 @@ export function Composer({
           value={queryText}
           onChange={(e) => setQueryText(e.target.value)}
           placeholder={placeholder}
-          className="flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-relaxed text-ink placeholder-graphite focus:outline-none disabled:cursor-not-allowed disabled:text-graphite-faint"
+          className="flex-1 resize-none bg-transparent py-2.5 text-[15px] leading-relaxed text-ink placeholder-graphite focus:outline-none disabled:cursor-not-allowed disabled:text-graphite"
           minRows={1}
           maxRows={8}
           onKeyDown={handleKeyDown}

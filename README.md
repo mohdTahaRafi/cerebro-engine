@@ -154,10 +154,16 @@ docker compose up -d       # Qdrant, MongoDB, Redis, vision service
 cd backend
 npm install
 npx node-gyp rebuild
-cp .env.example .env       # fill in COHERE_API_KEY, LLAMA_CLOUD_API_KEY, ANTHROPIC_API_KEY, ...
+cp .env.example .env       # fill in COHERE_API_KEY, LLAMA_CLOUD_API_KEY, ANTHROPIC_API_KEY,
+                            #   SESSION_SECRET (openssl rand -base64 32), PUBLIC_URL, ...
 npm run setup:qdrant       # idempotent — creates cerebro_chunks / cerebro_pages
 npm run dev
 ```
+
+`SESSION_SECRET` and `PUBLIC_URL` are required — the backend fails fast and names anything
+missing. Google/GitHub sign-in, email/SMS password reset, and per-tenant quotas are all
+optional and independently configurable; see [`AGENTS.md`](AGENTS.md)'s Run Locally section
+for the full list and what leaving each blank does.
 
 ### 3. Frontend
 
@@ -167,10 +173,28 @@ npm install
 npm run dev
 ```
 
-The app is live at **`http://localhost:5173`** (`/` chat, `/advanced` the developer
-console) — Vite proxies `/api/*` to the backend on `:5000`.
+The app is live at **`http://localhost:5173`** — `/login`/`/signup` to create an account,
+then `/chat`, `/contexts`, `/admin/traces`, and (admin only) `/admin/vectors` and
+`/admin/health`. Vite proxies `/api/*` to the backend on `:5000`.
 
 See [`AGENTS.md`](AGENTS.md) for the full check/test command list and coding conventions.
+
+---
+
+## Setting up OAuth (optional)
+
+Leaving both blank is a fully supported state — `GET /api/auth/capabilities` simply omits
+the provider and its button never appears. To enable one or both:
+
+1. **Google** — [console.cloud.google.com](https://console.cloud.google.com) → APIs &
+   Services → Credentials → OAuth client ID → Web application. Authorized redirect URI:
+   `${PUBLIC_URL}/api/auth/google/callback`. Set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`.
+2. **GitHub** — [github.com/settings/developers](https://github.com/settings/developers) →
+   New OAuth App. Authorization callback URL: `${PUBLIC_URL}/api/auth/github/callback`. Set
+   `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`.
+
+The callback URL must match `PUBLIC_URL` **exactly** — a mismatch is a provider-side error
+the app never sees (`docs/planning/v2/deployment.md` §1).
 
 ---
 
@@ -178,14 +202,20 @@ See [`AGENTS.md`](AGENTS.md) for the full check/test command list and coding con
 
 ```bash
 cd frontend && npm run build && cd ..
-cp .env.example .env       # DOMAIN, provider keys, MinIO credentials
+cp .env.example .env       # DOMAIN, provider keys, MinIO credentials, SESSION_SECRET, ...
 docker compose -f docker-compose.prod.yml up -d --wait
+npm --prefix backend run setup:qdrant
 ```
 
-Brings up the full stack — Qdrant, MongoDB, Redis, the vision service, the backend, MinIO
-(page-image object storage), and Caddy (automatic TLS + the SSE-safe reverse proxy) — with
-per-service memory limits. See `docker-compose.prod.yml`'s and `Caddyfile`'s own comments
-for what each piece does and why; `backend/bench/README.md` for the C++-vs-Qdrant benchmark;
+Brings up the full stack — Qdrant, MongoDB, Redis (now durable — sessions and password-reset
+codes live there), the vision service, the backend, MinIO (page-image object storage), and
+Caddy (automatic TLS, the canonical-host redirect, and the SSE-safe reverse proxy) — with
+per-service memory limits. **First deployment needs a strict order** (OAuth app registration
+→ `.env` → build → compose up → `setup:qdrant` → sign up the bootstrap admin → run the
+tenancy migration → verify isolation) — see
+[`docs/planning/v2/deployment.md`](docs/planning/v2/deployment.md) for every step spelled
+out, `docker-compose.prod.yml`'s and `Caddyfile`'s own comments for what each piece does and
+why, `backend/bench/README.md` for the C++-vs-Qdrant benchmark, and
 `backend/scripts/migrate-legacy.js`'s header comment if you're carrying documents forward
 from a pre-Phase-3 installation.
 
@@ -193,24 +223,49 @@ from a pre-Phase-3 installation.
 
 ## API Endpoints
 
+Everything under `/api/*` except `/api/auth/*` requires a signed-in session, and every result
+is scoped to the signed-in user's own contexts — `docs/planning/v2/architecture.md` §2 is the
+tenant-isolation invariant every route below is built on.
+
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Dependency status, circuit breaker states, queue depth, collection counts |
 | `GET` | `/metrics` | Prometheus exposition (internal-only — not routed through Caddy) |
-| `POST` | `/api/documents` | Upload and enqueue a document for async ingestion (multipart, field: `document`) |
-| `GET` | `/api/documents/:id/status` | Poll ingestion status/progress |
-| `POST` | `/api/search` | Hybrid retrieval, no generation (body: `{ "query": "..." }`) |
-| `POST` | `/api/ask` | Conversational RAG, SSE stream (body: `{ "query": "...", "threadId"?, "scopeDocumentIds"? }`) |
+| `GET` | `/api/auth/capabilities` | Which sign-in methods/OTP channels are configured |
+| `GET` | `/api/auth/session` | The signed-in user, or `{"user": null}` — never 401 |
+| `POST` | `/api/auth/signup` \| `/login` \| `/logout` \| `/logout-all` | Local account auth |
+| `GET` | `/api/auth/google` \| `/github` (+ `/callback`) | OAuth sign-in |
+| `POST` | `/api/auth/forgot-password` \| `/verify-otp` \| `/reset-password` | Password reset via OTP |
+| `GET`/`POST` | `/api/contexts` | List / create a context (a folder of documents) |
+| `GET`/`PATCH`/`DELETE` | `/api/contexts/:id` | One context — delete cascades asynchronously |
+| `POST`/`GET` | `/api/contexts/:id/documents` | Upload (multipart, field: `document`) / list documents in a context |
+| `GET`/`DELETE` | `/api/documents/:id` (+ `/status`, `/reingest`) | Single-document lifecycle |
+| `POST` | `/api/search` | Hybrid retrieval, no generation (body: `{ "query": "...", "contextId" }`) |
+| `POST` | `/api/ask` | Conversational RAG, SSE stream (body: `{ "query": "...", "contextId", "threadId"? }`) |
 | `GET`/`PATCH`/`DELETE` | `/api/threads` | Conversation history |
+| `GET` | `/api/pages/:documentId/:page.jpg` | A rendered scanned page image (ownership-checked) |
+| `GET` | `/api/traces` (+ `/:id`, `/by-message/:messageId`) | Per-query execution trace (the "why this answer" inspector) |
+| `GET` | `/api/vectors/:contextId/projection` | The cached 3D UMAP layout of a context's embeddings |
+| `POST` | `/api/vectors/query` | Place a query as a beacon in the projection (embeds, doesn't retrieve) |
+| `GET` | `/api/admin/queue` \| `/errors` | Operator-only (`requireAdmin`) — ingest backlog, recent pipeline errors |
 
 ### Example
 
 ```bash
-curl -X POST http://localhost:5000/api/documents -F "document=@./report.pdf"
+# Sign in first — every route below needs the resulting session cookie.
+curl -c cookies.txt -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" -d '{"email":"you@example.com","password":"..."}'
 
-curl -X POST http://localhost:5000/api/search \
+curl -b cookies.txt -X POST http://localhost:5000/api/contexts \
+  -H "Content-Type: application/json" -H "X-CSRF-Token: $(grep cerebro.csrf cookies.txt | awk '{print $7}')" \
+  -d '{"title": "Q3 Reports"}'
+
+curl -b cookies.txt -X POST "http://localhost:5000/api/contexts/<contextId>/documents" \
+  -F "document=@./report.pdf" -H "X-CSRF-Token: <token>"
+
+curl -b cookies.txt -X POST http://localhost:5000/api/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "quarterly revenue targets"}'
+  -d '{"query": "quarterly revenue targets", "contextId": "<contextId>"}'
 ```
 
 ---

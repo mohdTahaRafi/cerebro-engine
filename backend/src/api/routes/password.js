@@ -15,6 +15,7 @@ import { destroyAllSessions } from '../../auth/sessionLifecycle.js';
 import * as mailer from '../../notify/email.js';
 import * as sms from '../../notify/sms.js';
 import { recordPipelineError } from '../../telemetry/pipelineError.js';
+import { otpOutcomes } from '../../telemetry/metrics.js';
 
 const router = express.Router();
 
@@ -83,11 +84,13 @@ router.post('/api/auth/forgot-password', async (req, res, next) => {
       try {
         const send = requestedChannel === 'sms' ? sms.sendOtp : mailer.sendOtp;
         await send({ to: destination, code: issued.code, expiresInMinutes: OTP_TTL_MINUTES });
+        otpOutcomes.inc({ channel: requestedChannel, outcome: 'sent' });
       } catch (err) {
         // §5.4: delete the record (not the cooldown key) so the next request isn't
         // blocked by a code that was never delivered, but the retry is still paced.
         await discardOtp(user._id);
         await recordPipelineError('notify', err, { userId: user._id, retryable: true });
+        otpOutcomes.inc({ channel: requestedChannel, outcome: 'send_failed' });
       }
     }
 
@@ -108,6 +111,9 @@ router.post('/api/auth/verify-otp', async (req, res, next) => {
     const user = await User.findOne({ email: identifier.toLowerCase().trim() });
     const pseudoId = user ? String(user._id) : hashId(identifier);
     const result = await verifyOtp(pseudoId, code);
+    // §5.1's expired branch carries no channel to label with (otp.js's own comment) —
+    // every other branch does, since a record existed to read one off.
+    if (result.channel) otpOutcomes.inc({ channel: result.channel, outcome: result.ok ? 'verified' : result.reason });
 
     if (result.ok) {
       return res.status(200).json({ resetToken: result.resetToken, expiresInSeconds: result.expiresInSeconds });

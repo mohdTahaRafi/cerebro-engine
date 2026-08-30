@@ -44,14 +44,19 @@ export async function issueOtp(userId, channel) {
 export async function verifyOtp(userId, submitted) {
   const key = `otp:pwreset:${userId}`;
   const record = await redis.hgetall(key);
-  if (!record?.hash) return { ok: false, reason: 'expired' };
+  // `channel` is null here — an expired/never-issued code carries no record to read a
+  // channel off. api/routes/password.js does not emit cerebro_otp_outcomes_total for
+  // this branch for exactly that reason: the metric's `channel` label is email|sms only
+  // (metrics.js), and a request that can't name either is discarded rather than
+  // mislabeled — undercounting `expired` by that one path is the accepted tradeoff.
+  if (!record?.hash) return { ok: false, reason: 'expired', channel: null };
 
   // Increment FIRST, then compare. The reverse order lets an attacker who can abort the
   // connection mid-request retry indefinitely without ever incrementing the counter.
   const attempts = await redis.hincrby(key, 'attempts', 1);
   if (attempts > OTP_MAX_ATTEMPTS) {
     await redis.del(key);
-    return { ok: false, reason: 'locked' };
+    return { ok: false, reason: 'locked', channel: record.channel };
   }
 
   const expected = Buffer.from(record.hash, 'hex');
@@ -59,7 +64,7 @@ export async function verifyOtp(userId, submitted) {
   // Both buffers are always 32 bytes (sha256), so timingSafeEqual cannot throw on a
   // length mismatch. A plain === here leaks the shared-prefix length through timing.
   if (!crypto.timingSafeEqual(expected, actual)) {
-    return { ok: false, reason: 'invalid', attemptsRemaining: OTP_MAX_ATTEMPTS - attempts };
+    return { ok: false, reason: 'invalid', attemptsRemaining: OTP_MAX_ATTEMPTS - attempts, channel: record.channel };
   }
 
   // Single use: the code dies the moment it succeeds, before the password is written.
@@ -68,7 +73,7 @@ export async function verifyOtp(userId, submitted) {
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   await redis.set(`otp:reset-token:${tokenHash}`, String(userId), 'EX', RESET_TOKEN_TTL_SECONDS);
-  return { ok: true, resetToken: token, expiresInSeconds: RESET_TOKEN_TTL_SECONDS };
+  return { ok: true, resetToken: token, expiresInSeconds: RESET_TOKEN_TTL_SECONDS, channel: record.channel };
 }
 
 export async function consumeResetToken(token) {

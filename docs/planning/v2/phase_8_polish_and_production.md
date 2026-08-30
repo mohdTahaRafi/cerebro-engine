@@ -66,6 +66,18 @@ Everything else is measured and reported.
 Phase 1 §4.3 already sends an `X-CSRF-Token` header when a `cerebro.csrf` cookie exists; this
 phase creates the cookie and enforces the comparison.
 
+**Amended during implementation (2026-08-29):** the `issueCsrfToken` guard below is
+`if (!req.session?.userId) return next()`, not the `if (!req.session) return next()`
+originally drafted here. `req.session` exists on every request regardless of sign-in
+state (`saveUninitialized: false`, phase_5 §3.1, only controls whether it's *persisted*)
+— verified live, the original guard still wrote `req.session.csrf` on an anonymous `GET
+/api/auth/session`, which made express-session mint a `cerebro.sid` cookie for that
+visitor, exactly the "no cookie for every bot" behavior `saveUninitialized: false` exists
+to prevent (session.js's own header comment). Every CSRF-protected route already requires
+auth (the exemptions below cover every route that doesn't), so the token only needs to
+exist by the time a signed-in user makes their first state-changing request; gating on
+`userId` restores the anonymous-visitor property with no loss of coverage.
+
 ```js
 // backend/src/api/middleware/csrf.js
 //
@@ -76,7 +88,7 @@ phase creates the cookie and enforces the comparison.
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function issueCsrfToken(req, res, next) {
-  if (!req.session) return next();
+  if (!req.session?.userId) return next();
   req.session.csrf ??= crypto.randomBytes(32).toString('base64url');
   // Readable by JavaScript ON PURPOSE — the frontend must echo it into a header.
   // Its secrecy is not the control; the same-origin policy is. An attacker on another
@@ -107,6 +119,24 @@ GET navigation that carries no header the app controls) and `POST /api/auth/logi
 rate limiting).
 
 ### 3.2 Content Security Policy
+
+**Amended during implementation (2026-08-29), two points:**
+
+1. Caddy — not this Express process — serves `index.html` and the built JS/CSS in
+   production (Caddyfile's `handle {}` block); a CSP header on an Express JSON response
+   never reaches the document the browser actually renders. The directives below are
+   therefore sent from **both** places: helmet on Express (defense-in-depth for the API
+   surface itself) and the Caddyfile (§4.1, the one that matters for the SPA), kept as
+   two literal copies of the same string rather than one generated value, since the two
+   run in separate processes with no shared config loader. The `/admin/vectors`
+   route-scoped `worker-src` widening is a Caddy `header` directive keyed on a path
+   matcher (§4.1) — Express has no route at `/admin/vectors` to widen; that path is a
+   client-side React Router route, not a backend one.
+2. `script-src 'self'` with no `'unsafe-inline'` conflicted with index.html's Phase-1
+   inline theme-flash script. Extracted to `frontend/public/theme-init.js`, loaded via
+   `<script src="/theme-init.js">` — same-origin, still parser-blocking in `<head>`, so
+   the flash-prevention behavior is unchanged; this avoids both `'unsafe-inline'` and a
+   per-build CSP hash that would need regenerating on every edit to that script.
 
 Helmet's defaults are tightened, with one route-scoped widening:
 

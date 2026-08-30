@@ -175,7 +175,13 @@ router.get('/api/auth/google', (req, res, next) => {
     return res.status(404).json({ code: 'not_found', message: 'Google sign-in is not configured.' });
   }
   req.session.returnTo = safeReturnTo(typeof req.query.returnTo === 'string' ? req.query.returnTo : null);
-  passport.authenticate('google')(req, res, next);
+  // prompt: 'select_account' forces Google's account chooser on every login, even when
+  // the browser already has a live Google session — without it, Google silently
+  // re-authenticates the last-used account and the picker never appears (passport-
+  // google-oauth20's Strategy.authorizationParams reads this off the call options and
+  // forwards it as the `prompt` query param — verified in node_modules/passport-google-
+  // oauth20/lib/strategy.js:141-143 against the installed 2.0.0).
+  passport.authenticate('google', { prompt: 'select_account' })(req, res, next);
 });
 
 // GET /api/auth/google/callback — public. Resolve → link/create (linking.js §6.2) →

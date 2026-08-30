@@ -18,6 +18,7 @@ import { UploadDropzone } from '../../components/documents/UploadDropzone';
 import { DocumentTable } from '../../components/documents/DocumentTable';
 import { useDocuments } from '../../hooks/useDocuments';
 import { useUploadQueue } from '../../hooks/useUploadQueue';
+import { useContextScope } from '../../context/ContextScopeContext';
 import { api, CerebroApiError } from '../../../api';
 import type { KnowledgeContext, CreateContextRequest } from '../../../api/contracts';
 
@@ -34,6 +35,11 @@ export function ContextDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { documents, refresh } = useDocuments(contextId);
+  // Bug #1: this page manages its own `context` state and calls api.contexts.* directly,
+  // bypassing both useContexts (the /contexts list's copy) and ContextScopeProvider (the
+  // Chat switcher's copy). Renaming, deleting, or creating from here must invalidate the
+  // shared scope too, or the new state stays invisible in Chat until a full reload.
+  const { refresh: refreshScope } = useContextScope();
 
   const loadContext = useCallback(async () => {
     if (!contextId) return;
@@ -47,21 +53,32 @@ export function ContextDetail() {
   }, [contextId]);
 
   useEffect(() => { loadContext(); }, [loadContext]);
-  // The header's document/chunk counts are computed off the same document list
-  // useDocuments already polls — re-pull the context record whenever that list's length
-  // changes so the two never visibly disagree.
-  useEffect(() => { loadContext(); }, [documents.length, loadContext]);
+  // The header's document/chunk counts (denormalized onto Context — backend/src/contexts/
+  // counters.js) are computed off the same document list useDocuments already polls.
+  // Re-pull the context record whenever that list's length OR any row's status changes —
+  // length alone missed the far more common case of a single upload: the list goes from
+  // 0 to 1 document immediately (while it's still 'queued'), and length never changes
+  // again as that same row moves through 'processing' to 'ready', so the real
+  // documentCount bump on the backend was never picked up here. Also invalidates the
+  // shared ContextScopeContext (the Chat switcher's copy — same staleness bug as #1, this
+  // time triggered by ingestion completing rather than context creation): without it,
+  // Composer stayed disabled with "Add a document to this context first." even after the
+  // document the tooltip is about had genuinely finished and gone 'ready'.
+  const documentsFingerprint = documents.map((d) => `${d.id}:${d.status}`).join(',');
+  useEffect(() => { loadContext(); refreshScope(); }, [documentsFingerprint, loadContext, refreshScope]);
 
   const { optimisticRows, enqueue } = useUploadQueue(contextId, documents, refresh);
 
   const handleUpdate = useCallback(async (cid: string, body: CreateContextRequest) => {
     const updated = await api.contexts.update(cid, body);
     setContext(updated);
+    refreshScope();
     return updated;
-  }, []);
+  }, [refreshScope]);
 
   async function handleDelete(cid: string) {
     await api.contexts.delete(cid);
+    refreshScope();
     navigate('/contexts');
   }
 
@@ -155,7 +172,7 @@ export function ContextDetail() {
       <ContextFormDialog
         mode="create" open={createOpen} onOpenChange={setCreateOpen}
         onSubmit={(body) => api.contexts.create(body)}
-        onSuccess={(created) => { toast.success('Context created.'); navigate(`/contexts/${created.id}`); }}
+        onSuccess={(created) => { refreshScope(); toast.success('Context created.'); navigate(`/contexts/${created.id}`); }}
       />
       <DeleteContextDialog context={context} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={handleDelete} />
     </>

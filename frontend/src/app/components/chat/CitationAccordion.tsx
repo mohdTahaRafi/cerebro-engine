@@ -12,7 +12,7 @@ const BRANCH_LABEL: Record<NonNullable<ProvenanceSource['branch']>, string> = {
 };
 
 function RankMovement({ fusionRank, finalRank }: { fusionRank: number | null; finalRank: number | null }) {
-  if (fusionRank == null || finalRank == null) return <span className="text-graphite-faint">—</span>;
+  if (fusionRank == null || finalRank == null) return <span className="text-graphite">—</span>;
   const delta = fusionRank - finalRank;
   const color = delta > 0 ? 'text-positive-text' : delta < 0 ? 'text-critical-text' : 'text-graphite';
   return (
@@ -78,7 +78,7 @@ export function CitationAccordion({ source, index, expanded, onToggle, active, a
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-2">
             <span className="truncate text-sm font-medium text-ink">
-              {fileName}{!available && <span className="text-graphite-faint"> (deleted)</span>}
+              {fileName}{!available && <span className="text-graphite"> (deleted)</span>}
             </span>
             {source.score != null && (
               <span
@@ -112,13 +112,13 @@ export function CitationAccordion({ source, index, expanded, onToggle, active, a
               </button>
             ) : (
               <div className="flex h-24 w-[96px] items-center justify-center rounded-md border border-line bg-surface-sunken">
-                <ImageOff className="size-4 text-graphite-faint" aria-hidden="true" />
+                <ImageOff className="size-4 text-graphite" aria-hidden="true" />
               </div>
             )
           )}
 
           {resumed ? (
-            <p className="text-xs italic text-graphite-faint">Text isn't stored for past conversations.</p>
+            <p className="text-xs italic text-graphite">Text isn't stored for past conversations.</p>
           ) : (
             <blockquote className="rounded-md border border-line-subtle bg-surface-sunken px-3 py-2 text-xs leading-relaxed text-ink-secondary">
               “{source.text}”

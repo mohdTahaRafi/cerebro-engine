@@ -1,6 +1,7 @@
 import { Strategy as GitHubStrategy } from 'passport-github2';
 import { config } from '../../config/index.js';
 import { resolveIdentity } from '../linking.js';
+import { authOutcomes } from '../../telemetry/metrics.js';
 
 // GitHub's `/user` profile always returns `email: null` when the user has hidden their
 // address, and the profile carries no verification flag at all — a second call to
@@ -46,7 +47,11 @@ export function registerGitHubStrategy(passport) {
         avatarUrl: profile.photos?.[0]?.value ?? null,
       };
       const result = await resolveIdentity(normalized);
-      if (!result.ok) return done(null, false, { code: result.code });
+      if (!result.ok) {
+        authOutcomes.inc({ method: 'github', outcome: 'invalid' });
+        return done(null, false, { code: result.code });
+      }
+      authOutcomes.inc({ method: 'github', outcome: result.linked ? 'linked' : 'success' });
       return done(null, result.user);
     } catch (err) {
       return done(err);

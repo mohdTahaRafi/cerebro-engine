@@ -1,6 +1,7 @@
 import { Strategy as LocalStrategy } from 'passport-local';
 import { User } from '../../models/User.js';
 import { verifyPassword, needsRehash, hashPassword } from '../password.js';
+import { authOutcomes } from '../../telemetry/metrics.js';
 
 // `session: false` (see google.js's header comment) — this strategy only decides
 // authentic/not; routes/auth.js's login route drives establishSession itself.
@@ -22,9 +23,15 @@ export function registerLocalStrategy(passport) {
       // OAuth-only account (passwordHash === null) is not distinguishable by timing
       // from a wrong password on a real account.
       const ok = await verifyPassword(user?.passwordHash ?? null, password);
-      if (!user || !ok) return done(null, false);
+      if (!user || !ok) {
+        authOutcomes.inc({ method: 'local', outcome: 'invalid' });
+        return done(null, false);
+      }
 
-      if (user.status !== 'active') return done(null, false, { code: 'account_suspended' });
+      if (user.status !== 'active') {
+        authOutcomes.inc({ method: 'local', outcome: 'locked' });
+        return done(null, false, { code: 'account_suspended' });
+      }
 
       // Opportunistic rehash: only ever raises the work factor, never on the failure path.
       if (needsRehash(user.passwordHash)) {
@@ -32,6 +39,7 @@ export function registerLocalStrategy(passport) {
         await user.save();
       }
 
+      authOutcomes.inc({ method: 'local', outcome: 'success' });
       return done(null, user);
     } catch (err) {
       return done(err);

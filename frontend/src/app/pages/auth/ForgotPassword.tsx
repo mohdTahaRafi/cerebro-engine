@@ -88,7 +88,7 @@ export function ForgotPassword() {
                 type="email"
                 inputMode="email"
                 autoComplete="username"
-                placeholder="you@company.com"
+                placeholder="Enter your email"
                 required
                 disabled={pending}
                 value={identifier}

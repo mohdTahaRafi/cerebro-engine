@@ -110,7 +110,7 @@ export function Login() {
                 type="email"
                 inputMode="email"
                 autoComplete="username"
-                placeholder="you@company.com"
+                placeholder="Enter your email"
                 required
                 disabled={pending}
                 value={email}
@@ -125,6 +125,7 @@ export function Login() {
 
           <PasswordField
             label="Password"
+            placeholder="Enter your password"
             value={password}
             onChange={setPassword}
             autoComplete="current-password"
@@ -163,9 +164,6 @@ export function Login() {
             </div>
             <div className="flex flex-col gap-3">
               {capabilities.providers
-                // The login card matches Cerebro's approved auth design, which offers
-                // Google only — GitHub stays on /signup until product decides to add it here.
-                .filter((p) => p !== 'github')
                 .map((p) => <ProviderButton key={p} provider={p} className="h-[54px] rounded-[10px] text-[16px]" />)}
             </div>
           </>

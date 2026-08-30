@@ -39,9 +39,9 @@ export function EvidenceMargin({ sources, expandedIndex, onToggle, activeIndex, 
 
       {sources.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line px-4 py-10 text-center">
-          <FileText className="size-5 text-graphite-faint" aria-hidden="true" />
+          <FileText className="size-5 text-graphite" aria-hidden="true" />
           <p className="text-sm text-graphite">No sources yet</p>
-          <p className="text-xs text-graphite-faint">Sources will appear here once you ask a question.</p>
+          <p className="text-xs text-graphite">Sources will appear here once you ask a question.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-2" id="citation-list">

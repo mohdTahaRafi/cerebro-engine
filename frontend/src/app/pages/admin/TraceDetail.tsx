@@ -27,7 +27,7 @@ export function TraceDetail() {
     return (
       <div className="p-8">
         <Unavailable
-          reason="Trace history is recorded from Phase 7. The trace for your most recent query is available from the chat ribbon."
+          reason="This trace isn't available. It may have been recorded before trace history was enabled, or the id no longer matches a query."
           action={{ label: 'Go to chat', to: '/chat' }}
         />
       </div>

@@ -4,8 +4,27 @@
 # Serves the static frontend bundle from /srv/frontend, which docker-compose.prod.yml
 # bind-mounts from ./frontend/dist — run `cd frontend && npm run build` before `docker
 # compose -f docker-compose.prod.yml up`; this Caddyfile does not build it itself.
-{$DOMAIN} {
+#
+# phase_8 §4.1, amended live: BOTH hostnames are on this one site address line, not just
+# {$DOMAIN}. Verified live against a real TLS handshake: with only {$DOMAIN} here, Caddy's
+# automatic HTTPS provisions a certificate for that hostname alone, so a request that
+# arrives on https://www.{$DOMAIN} fails the TLS handshake itself ("tlsv1 alert internal
+# error" — no matching certificate) before Caddy ever reaches the @wrongHost redirect
+# below. The redirect would then only work for plain-HTTP www visitors, a shrinking
+# fraction of real traffic once HSTS is in play. Listing both here makes Caddy request
+# and serve a certificate covering both names (ACME requires www.{$DOMAIN} to resolve to
+# this host too, same as the apex), so the redirect actually fires over HTTPS.
+{$DOMAIN}, www.{$DOMAIN} {
     encode gzip
+
+    # phase_8 §4.1 — OAuth callbacks are ordinary /api/* paths and need no special
+    # handling — they are covered by the block below. What DOES need care: the browser
+    # must arrive on the canonical host, because the OAuth redirect_uri registered with
+    # Google and GitHub is built from PUBLIC_URL. A visit to www.{$DOMAIN} that proxied
+    # through would produce a redirect_uri mismatch at the provider, which surfaces as a
+    # provider-side error page the app never sees. Redirect rather than serve.
+    @wrongHost host www.{$DOMAIN}
+    redir @wrongHost https://{$DOMAIN}{uri} permanent
 
     # Every backend route is defined WITH its literal /api/ prefix baked in
     # (backend/src/api/routes/*.js — e.g. `router.post('/api/ask', ...)`, not `/ask`
@@ -34,9 +53,41 @@
         }
     }
 
+    # phase_8 §3.2 — the same Content-Security-Policy directives backend/src/api/index.js
+    # sends via helmet, applied here as well because Caddy — not the Express process — is
+    # what actually serves index.html and the built JS/CSS below. A CSP header on a JSON
+    # API response never reaches the document the browser renders; only this header does.
+    # Kept as one literal string, duplicated from the CSP_DIRECTIVES object in that file
+    # rather than generated from it, since the two run in different processes with no
+    # shared config loader.
+    header Content-Security-Policy "default-src 'self'; img-src 'self' data: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    header X-Content-Type-Options "nosniff"
+    header Referrer-Policy "strict-origin-when-cross-origin"
+    header Permissions-Policy "camera=(), microphone=(), geolocation=()"
+
     handle {
         root * /srv/frontend
         try_files {path} /index.html
         file_server
+
+        # phase_8 §3.2 — /admin/vectors alone additionally needs worker-src 'self' blob:
+        # (R3F creates workers from blobs). This header directive runs after the
+        # unconditional one above, in file order, and REPLACES Content-Security-Policy
+        # only for a request matching @vectors — the same override pattern @html/@assets
+        # below use for Cache-Control, proven not to fall prey to Caddy's directive-type
+        # reordering (that reordering hazard is between DIFFERENT directive types, e.g.
+        # handle_path vs reverse_proxy, per the comment above; two `header` directives at
+        # the same level keep their written order).
+        @vectors path /admin/vectors /admin/vectors/*
+        header @vectors Content-Security-Policy "default-src 'self'; img-src 'self' data: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+
+        # The SPA's index.html must never be cached, or a deploy leaves clients on an old
+        # bundle referencing hashed assets that no longer exist. Hashed assets themselves
+        # are immutable and cached hard.
+        @html path /index.html /
+        header @html Cache-Control "no-store"
+        @assets path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
     }
 }

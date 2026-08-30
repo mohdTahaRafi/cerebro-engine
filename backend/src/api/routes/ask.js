@@ -6,7 +6,7 @@ import mongoose from 'mongoose';
 import { randomUUID } from 'crypto';
 import { ragGraph } from '../../graph/ragGraph.js';
 import { Conversation } from '../../models/Conversation.js';
-import { persistTurn } from '../../conversation/persistTurn.js';
+import { persistTurn, persistFailedTurn } from '../../conversation/persistTurn.js';
 import { MAX_QUERY_CHARS } from '../../retrieval/constants.js';
 import { buildTelemetry } from '../../telemetry/pipelineTelemetry.js';
 import { recordPipelineTelemetry } from '../../telemetry/metrics.js';
@@ -95,8 +95,13 @@ router.post('/api/ask', requireContext, async (req, res) => {
   // (phase 6 §2.4) resolves.
   const runId = randomUUID();
 
+  // Declared outside the try so the catch block (persistFailedTurn, below) still knows
+  // which thread a failure happened on — including a brand-new thread, whose id is
+  // assigned inside the try and must survive into the catch that follows it.
+  let conversationId;
+
   try {
-    const conversationId = threadId ?? (await Conversation.create({
+    conversationId = threadId ?? (await Conversation.create({
       userId: req.tenant.userId, contextId: req.tenant.contextId,
     }))._id;
     // Emitted before the graph runs at all — deliberately earlier than §9.1's table
@@ -143,6 +148,17 @@ router.post('/api/ask', requireContext, async (req, res) => {
   } catch (err) {
     if (err.name === 'AbortError') return;    // client left; nothing to report
     console.error('[ask] request failed:', err);
+    // Persist the question that was actually asked before reporting the failure, so a
+    // navigation away or a hard refresh has a real Message to reload instead of an empty
+    // thread (see persistFailedTurn's own comment). conversationId is only unset if
+    // Conversation.create itself threw — nothing to attach a message to in that case.
+    if (conversationId) {
+      try {
+        await persistFailedTurn(conversationId, req.tenant, query);
+      } catch (persistErr) {
+        console.error('[ask] failed to persist failed turn:', persistErr.message);
+      }
+    }
     emit('error', { error: err.message });
   } finally {
     clearInterval(heartbeat);

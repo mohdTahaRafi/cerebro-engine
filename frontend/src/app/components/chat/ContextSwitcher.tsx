@@ -57,7 +57,7 @@ export function ContextSwitcher() {
   if (status === 'unavailable') {
     return (
       <span
-        className="flex items-center gap-2 rounded-lg border border-line-subtle px-3 py-1.5 text-sm text-graphite-faint"
+        className="flex items-center gap-2 rounded-lg border border-line-subtle px-3 py-1.5 text-sm text-graphite"
         title="Couldn't reach the contexts endpoint. Try reloading — your contexts and their documents are unaffected."
       >
         <FileText className="size-4" aria-hidden="true" />
@@ -94,7 +94,7 @@ export function ContextSwitcher() {
             <span className="max-w-[220px] truncate">{activeContext?.title ?? 'Select a context'}</span>
             {activeContext && (
               <>
-                <span className="text-graphite-faint">·</span>
+                <span className="text-graphite">·</span>
                 <span className="text-graphite">{activeContext.documentCount} document{activeContext.documentCount === 1 ? '' : 's'}</span>
               </>
             )}

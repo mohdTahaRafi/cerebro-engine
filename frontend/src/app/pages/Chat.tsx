@@ -19,7 +19,7 @@ import { EmptyState } from '../components/design/EmptyState';
 export function Chat() {
   const { stopGenerating } = useEngine();
   const { activeContext, status: contextStatus, refresh: refreshContexts } = useContextScope();
-  const { turns, lastTurn, ask, retryLast, regenerate, isGenerating } = useTranscript();
+  const { turns, lastTurn, ask, retryLast, regenerate, isGenerating, isThreadLoading } = useTranscript();
   const citationHover = useCitationHover();
   const [exampleFileNames, setExampleFileNames] = useState<string[]>([]);
 
@@ -69,6 +69,7 @@ export function Chat() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <Transcript
             turns={turns}
+            isThreadLoading={isThreadLoading}
             activeContext={activeContext}
             contextIsEmpty={contextIsEmpty}
             exampleFileNames={exampleFileNames}
@@ -92,7 +93,7 @@ export function Chat() {
                 isSettling={isSettling}
                 enqueue={enqueue}
               />
-              <p className="text-center text-xs text-graphite-faint">Cerebro can make mistakes. Verify important information.</p>
+              <p className="text-center text-xs text-graphite">Cerebro can make mistakes. Verify important information.</p>
             </div>
           </div>
         </div>

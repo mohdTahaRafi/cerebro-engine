@@ -11,6 +11,19 @@ import type { KnowledgeContext, CreateContextRequest } from '../../api/contracts
 
 const STORAGE_KEY = 'cerebro.activeContext';
 
+// Module-level, not component state: survives ContextScopeProvider unmounting and
+// remounting, which happens on navigation to/from /admin/health — RequireAdmin's guard
+// deliberately sits OUTSIDE AppShell (routes.tsx's comment on that route, and
+// RequireAdmin.tsx), so the browser gets a genuinely separate <AppShell> element there,
+// and React unmounts/remounts everything under it, ContextScopeProvider included.
+// Without this cache, that remount re-ran `load()` from scratch every time, which is
+// what made the context selector visibly flash back to its loading skeleton on
+// navigation. Reusing the last resolved result here means a remount hydrates instantly
+// instead — `refresh()` (below, and useContexts.ts's create/update/remove) is still the
+// only thing that ever forces a real re-fetch, so an explicit mutation still updates
+// every consumer immediately, same as before.
+let scopeCache: { contexts: KnowledgeContext[]; activeId: string | null; status: ContextScopeStatus } | null = null;
+
 // 'none'        — the list call succeeded and returned zero contexts.
 // 'unavailable' — the endpoint isn't there yet (no Context model on the backend outside
 //                 mock mode — Phase 2). Distinct from 'none': there may well BE contexts,
@@ -30,9 +43,9 @@ interface ContextScopeState {
 const ContextScope = createContext<ContextScopeState | undefined>(undefined);
 
 export function ContextScopeProvider({ children }: { children: ReactNode }) {
-  const [contexts, setContexts] = useState<KnowledgeContext[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [status, setStatus] = useState<ContextScopeStatus>('loading');
+  const [contexts, setContexts] = useState<KnowledgeContext[]>(() => scopeCache?.contexts ?? []);
+  const [activeId, setActiveId] = useState<string | null>(() => scopeCache?.activeId ?? null);
+  const [status, setStatus] = useState<ContextScopeStatus>(() => scopeCache?.status ?? 'loading');
 
   const load = useCallback(() => {
     setStatus('loading');
@@ -68,7 +81,22 @@ export function ContextScopeProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
-  useEffect(load, [load]);
+  // Skip the fetch entirely when a previous mount already resolved one this session — a
+  // remount (see the scopeCache comment above) should hydrate from that, not refetch.
+  // The `status !== 'loading'` half guards the (very unlikely) case of remounting while
+  // the FIRST fetch is still in flight: scopeCache exists but nothing has resolved into
+  // it yet, so skipping here would leave this instance stuck on the loading skeleton
+  // forever with nothing left to ever call `load()` again.
+  useEffect(() => {
+    if (scopeCache && scopeCache.status !== 'loading') return;
+    load();
+  }, [load]);
+
+  // Mirrors this provider's state into the module cache on every change, so the NEXT
+  // mount (a remount, not this one) starts from up-to-date data instead of refetching.
+  useEffect(() => {
+    scopeCache = { contexts, activeId, status };
+  }, [contexts, activeId, status]);
 
   const setActive = useCallback((id: string) => {
     setActiveId(id);

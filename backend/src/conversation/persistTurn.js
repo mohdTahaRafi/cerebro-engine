@@ -51,3 +51,32 @@ export async function persistTurn(conversationId, tenant, userQuery, final, { te
 
   return { traceId };
 }
+
+// persistFailedTurn — writes only the user's half of an exchange when the graph run
+// throws (ask.js's catch block) after the thread already exists. Conversation.create
+// and the `threadId` SSE frame both happen before ragGraph.invoke (ask.js), so by the
+// time a failure can occur the client has already echoed the question into its own
+// transcript state — but that state lives only in the browser (useTranscript's `turns`
+// array) and is never durable. Without this, a failed turn leaves zero Message docs
+// behind: navigating away or hard-refreshing has nothing to reload, and the question
+// silently vanishes even though the user watched it get asked.
+//
+// The assistant side is deliberately never written here — there is no real content for
+// a role: 'assistant' message that never generated a reply, and Message.content is
+// required (models/Message.js). The absence of a paired assistant message IS the
+// persisted signal that this turn failed: useTranscript.ts's loadTranscript reconstructs
+// `status: 'error'` for exactly this shape (a user message with no assistant message
+// immediately after it) rather than needing a stored error string.
+export async function persistFailedTurn(conversationId, tenant, userQuery) {
+  await Message.create({ conversationId, userId: tenant.userId, role: 'user', content: userQuery });
+
+  // Same titling rule as persistTurn's success path (§ above) — a thread whose first-ever
+  // turn failed should still pick up a real title from that question rather than sitting
+  // as "New conversation" forever.
+  const convo = await Conversation.findById(conversationId);
+  if (convo.title === 'New conversation') {
+    convo.title = userQuery.length <= 60 ? userQuery : `${userQuery.slice(0, 57).replace(/\s+\S*$/, '')}…`;
+  }
+  convo.lastMessageAt = new Date();
+  await convo.save();
+}

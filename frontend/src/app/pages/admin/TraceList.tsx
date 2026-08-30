@@ -87,7 +87,7 @@ export function TraceList() {
 
       {status === 'unavailable' && (
         <Unavailable
-          reason="Trace history is recorded from Phase 7. The trace for your most recent query is available from the chat ribbon."
+          reason="Trace history isn't available right now. The trace for your most recent query is still available from the chat ribbon."
           action={{ label: 'Go to chat', to: '/chat' }}
         />
       )}

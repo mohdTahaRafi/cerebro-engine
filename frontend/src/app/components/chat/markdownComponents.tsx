@@ -51,7 +51,7 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   return (
     <div className="group/code relative mb-3 overflow-hidden rounded-lg border border-line bg-surface-sunken last:mb-0">
       {lang && (
-        <span className="pointer-events-none absolute right-2 top-1.5 text-[10px] font-medium uppercase tracking-wide text-graphite-faint">
+        <span className="pointer-events-none absolute right-2 top-1.5 text-[10px] font-medium uppercase tracking-wide text-graphite">
           {lang}
         </span>
       )}
@@ -100,5 +100,5 @@ export const MARKDOWN_COMPONENTS: Components = {
   blockquote: (props) => <blockquote className="mb-3 border-l-[3px] border-line-strong pl-3 text-ink-secondary last:mb-0" {...props} />,
   // §4.3 — retrieved document text is untrusted; an `img` URL is an outbound request from
   // an authenticated session, so images are never fetched. Alt text stands in for it.
-  img: ({ alt }) => <span className="text-graphite-faint">{alt}</span>,
+  img: ({ alt }) => <span className="text-graphite">{alt}</span>,
 };

@@ -138,7 +138,7 @@ export function ProvenanceRibbon({ status, telemetry, sources, traceId, hideTrac
               View trace ›
             </Link>
           ) : (
-            <span className="text-graphite-faint" title="Traces are recorded from Phase 7.">View trace ›</span>
+            <span className="text-graphite" title="No trace was recorded for this turn.">View trace ›</span>
           )
         )}
       </div>

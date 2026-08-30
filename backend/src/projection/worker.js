@@ -9,6 +9,7 @@ import { config } from '../config/index.js';
 import { Projection } from '../models/Projection.js';
 import { fitContext, PROJECTION_PARAMS, PROJECTION_SEED } from './fit.js';
 import { recordPipelineError } from '../telemetry/pipelineError.js';
+import { projectionDuration } from '../telemetry/metrics.js';
 
 // Same two-connection split as ingestion/queue.js and contexts/queue.js, for the
 // identical reason: the worker needs unlimited per-command retries (BullMQ's blocking
@@ -62,7 +63,12 @@ export async function enqueueProjectionRebuild(tenant) {
 
 async function processFit(job) {
   const tenant = { userId: job.data.userId, contextId: job.data.contextId };
+  // cerebro_projection_fit_seconds (phase 8 §5.1) — the ProjectionFitSlow alert watches
+  // its p95 against the 20k-node downsample cap (alerts.yml). Observed regardless of
+  // outcome: a fit that fails after running for 40s still spent 40s of worker time.
+  const start = performance.now();
   const result = await fitContext(tenant);
+  projectionDuration.observe((performance.now() - start) / 1000);
 
   if (result.status === 'failed') {
     await Projection.updateOne(

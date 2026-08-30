@@ -2,13 +2,17 @@
 # and Caddyfile). Real public ACME/Let's Encrypt TLS issuance is untestable in this sandbox:
 # there is no publicly-resolvable DNS record for any domain pointed at this host, and Let's
 # Encrypt's HTTP-01/TLS-ALPN-01 challenges both require exactly that. `tls internal` swaps in
-# Caddy's own local CA instead — everything else (the /api/* routing, flush_interval -1
-# scoping, the SPA catch-all) is identical to the real Caddyfile, so this exercises that
-# routing logic for real while only substituting how the certificate itself is obtained.
-{$DOMAIN} {
+# Caddy's own local CA instead — everything else, including phase_8's canonical-host redirect,
+# CSP/security headers, and cache-control split, is identical to the real Caddyfile, so this
+# exercises that routing and header logic for real while only substituting how the
+# certificate itself is obtained.
+{$DOMAIN}, www.{$DOMAIN} {
     tls internal
 
     encode gzip
+
+    @wrongHost host www.{$DOMAIN}
+    redir @wrongHost https://{$DOMAIN}{uri} permanent
 
     handle /api/* {
         reverse_proxy backend:5000 {
@@ -16,9 +20,23 @@
         }
     }
 
+    header Content-Security-Policy "default-src 'self'; img-src 'self' data: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    header X-Content-Type-Options "nosniff"
+    header Referrer-Policy "strict-origin-when-cross-origin"
+    header Permissions-Policy "camera=(), microphone=(), geolocation=()"
+
     handle {
         root * /srv/frontend
         try_files {path} /index.html
         file_server
+
+        @vectors path /admin/vectors /admin/vectors/*
+        header @vectors Content-Security-Policy "default-src 'self'; img-src 'self' data: https://lh3.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:"
+
+        @html path /index.html /
+        header @html Cache-Control "no-store"
+        @assets path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
     }
 }

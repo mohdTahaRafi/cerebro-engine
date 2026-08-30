@@ -6,7 +6,7 @@
 // own scrolling.
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowDown, Waypoints } from 'lucide-react';
+import { ArrowDown, Loader2, Waypoints } from 'lucide-react';
 import { Turn } from './Turn';
 import type { Turn as TurnModel } from '../../hooks/useTranscript';
 import type { KnowledgeContext } from '../../../api/contracts';
@@ -25,6 +25,10 @@ function formatTime(iso: string): string {
 
 interface TranscriptProps {
   turns: TurnModel[];
+  /** True while a persisted thread's messages are still being fetched (useTranscript's
+   *  loadTranscript) — distinguishes "loading a real conversation" from "genuinely no
+   *  conversation yet" so the New Chat empty state never stands in for a slow fetch. */
+  isThreadLoading: boolean;
   activeContext: KnowledgeContext | null;
   contextIsEmpty: boolean;
   exampleFileNames: string[];
@@ -37,7 +41,7 @@ interface TranscriptProps {
 }
 
 export function Transcript({
-  turns, activeContext, contextIsEmpty, exampleFileNames, onExampleClick,
+  turns, isThreadLoading, activeContext, contextIsEmpty, exampleFileNames, onExampleClick,
   activeCitation, onHoverCitation, onClickCitation, onRegenerate, onRetry,
 }: TranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -87,7 +91,22 @@ export function Transcript({
         className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8 custom-scrollbar"
       >
         <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col">
-          {!hasContent ? (
+          {!hasContent && isThreadLoading ? (
+            // A persisted thread is being fetched — never the New Chat empty state, which
+            // would misrepresent a real, loading conversation as no conversation at all
+            // (the flicker this guards against). No copy, just motion: a caption here
+            // would itself flash for a few hundred ms on every ordinary thread open.
+            <motion.div
+              key="thread-loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-1 flex-col items-center justify-center gap-3 text-center"
+              role="status"
+              aria-label="Loading conversation"
+            >
+              <Loader2 className="size-6 animate-spin text-graphite" aria-hidden="true" />
+            </motion.div>
+          ) : !hasContent ? (
             <motion.div
               key="empty"
               initial={{ opacity: 0 }}

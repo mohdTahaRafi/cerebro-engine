@@ -9,6 +9,7 @@ import { config } from '../../config/index.js';
 import { Context } from '../../models/Context.js';
 import { Document } from '../../models/Document.js';
 import { requireContext } from '../middleware/requireContext.js';
+import { checkContextLimit, checkUploadQuotas } from '../middleware/quotas.js';
 import { uploadLimiter } from '../middleware/rateLimit.js';
 import { upload, ACCEPTED } from '../middleware/upload.js';
 import { verifyType } from '../../ingestion/verifyType.js';
@@ -31,7 +32,7 @@ router.get('/api/contexts', async (req, res, next) => {
 });
 
 // ── POST /api/contexts ────────────────────────────────────────────────────────────────
-router.post('/api/contexts', async (req, res, next) => {
+router.post('/api/contexts', checkContextLimit, async (req, res, next) => {
   try {
     const { title, description } = req.body ?? {};
     if (typeof title !== 'string' || title.trim().length < 1 || title.trim().length > 80) {
@@ -121,7 +122,7 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
-router.post('/api/contexts/:contextId/documents', requireContext, uploadLimiter, upload.single('document'), async (req, res, next) => {
+router.post('/api/contexts/:contextId/documents', requireContext, uploadLimiter, checkUploadQuotas, upload.single('document'), async (req, res, next) => {
   if (!req.file) return res.status(400).json({ error: 'No document provided.' });
 
   const tmpPath = req.file.path;

@@ -394,6 +394,7 @@ export function ResetPassword() {
                   )}
                   <PasswordField
                     label="New password"
+                    placeholder="Enter your new password"
                     value={newPassword}
                     onChange={setNewPassword}
                     autoComplete="new-password"
@@ -407,6 +408,7 @@ export function ResetPassword() {
                   />
                   <PasswordField
                     label="Confirm new password"
+                    placeholder="Confirm your new password"
                     value={confirmPassword}
                     onChange={setConfirmPassword}
                     onBlur={onConfirmBlur}

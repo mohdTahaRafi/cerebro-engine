@@ -18,7 +18,7 @@ export async function resolveIdentity(profile) {
     identities: { $elemMatch: { provider, providerId } },
   });
   if (byIdentity) {
-    return { ok: true, user: byIdentity, created: false };
+    return { ok: true, user: byIdentity, created: false, linked: false };
   }
 
   const identitySubdoc = {
@@ -75,7 +75,12 @@ export async function resolveIdentity(profile) {
     if (!existing.name && name) existing.name = name;
     if (!existing.avatarUrl && avatarUrl) existing.avatarUrl = avatarUrl;
     await existing.save();
-    return { ok: true, user: existing, created: false };
+    // Phase 8 §5.1: `linked: true` marks THIS branch specifically — a verified provider
+    // assertion attaching a new identity to an existing account — for
+    // cerebro_auth_outcomes_total's `linked` outcome, distinct from an ordinary
+    // returning-user login (branch 1, `linked: false`) even though both reach here with
+    // `created: false`.
+    return { ok: true, user: existing, created: false, linked: true };
   }
 
   // 5. The local account claimed this address but never proved it. Promoting an

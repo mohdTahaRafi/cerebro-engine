@@ -94,3 +94,52 @@ export const queueDepth = new client.Gauge({
 });
 
 export const BREAKER_STATE_VALUE = { closed: 0, 'half-open': 1, open: 2 };
+
+// Phase 8 §5.1 — five more families, all bounded by an enum or a single gauge, never by
+// userId. A label whose values are unbounded creates one time series per user per
+// metric; at 10,000 users and 7 metric families that is 70,000 series from one process,
+// which is how a Prometheus instance dies. Per-user attribution, when genuinely needed,
+// comes from the `traces` and `usage_events` collections instead (already indexed by
+// userId and the right store for a high-cardinality fact).
+
+// A bounded tenant-activity gauge set on scrape (routes/metrics.js), not a per-user label.
+export const activeTenants = new client.Gauge({
+  name: 'cerebro_active_tenants',
+  help: 'Distinct users with at least one request in the last 5 minutes.',
+  registers: [registry],
+});
+
+// Bounded by the enum, not by user count. Incremented in api/middleware/quotas.js at
+// the same point each refusal is returned.
+export const quotaRejections = new client.Counter({
+  name: 'cerebro_quota_rejections_total',
+  help: 'Requests refused by a per-tenant quota.',
+  labelNames: ['limit'],   // documents_per_context | contexts_per_user | storage | chunks
+  registers: [registry],
+});
+
+// Incremented from auth/strategies/local.js, google.js, and github.js at the point
+// each verify callback resolves.
+export const authOutcomes = new client.Counter({
+  name: 'cerebro_auth_outcomes_total',
+  help: 'Authentication attempts by method and outcome.',
+  labelNames: ['method', 'outcome'],   // local|google|github × success|invalid|locked|linked
+  registers: [registry],
+});
+
+// Incremented from api/routes/password.js at forgot-password (sent/send_failed) and
+// verify-otp (verified/invalid/expired/locked).
+export const otpOutcomes = new client.Counter({
+  name: 'cerebro_otp_outcomes_total',
+  help: 'OTP verification attempts.',
+  labelNames: ['channel', 'outcome'],  // email|sms × sent|verified|invalid|expired|locked|send_failed
+  registers: [registry],
+});
+
+// UMAP fit duration — recorded in projection/worker.js around the fit() call.
+export const projectionDuration = new client.Histogram({
+  name: 'cerebro_projection_fit_seconds',
+  help: 'UMAP fit duration.',
+  buckets: [1, 2, 5, 10, 15, 30, 60, 120],
+  registers: [registry],
+});

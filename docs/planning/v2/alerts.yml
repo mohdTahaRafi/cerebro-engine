@@ -1,0 +1,83 @@
+# Phase 8 §5.2 — Prometheus alerting rules for Cerebro v2. Loaded by a Prometheus
+# instance scraping the backend container's :5000/metrics from inside the Docker
+# network (that endpoint is deliberately absent from the Caddyfile's route table —
+# §4.1 — so this file assumes a scraper with internal network access, not the public
+# internet). Each rule's `for` duration and threshold are chosen in the table this file
+# mirrors; the reasoning column there is restated here as each rule's `annotations.reason`
+# so an on-call engineer sees WHY a threshold was picked, not just that it fired.
+groups:
+  - name: cerebro.rules
+    rules:
+      - alert: IngestQueueBacklog
+        expr: cerebro_queue_depth{state="waiting"} > 50
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ingest queue backlog is {{ $value }} documents waiting"
+          reason: >-
+            At concurrency 2 and ~30 s/document, 50 waiting is ~12 minutes of backlog —
+            past a user's patience, short of a real outage.
+
+      - alert: BreakerOpen
+        expr: cerebro_breaker_state > 1
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} is open"
+          reason: >-
+            An open breaker means a provider has been failing long enough to trip;
+            2 minutes filters a transient blip from a real outage.
+
+      - alert: RetrievalP95Regression
+        expr: histogram_quantile(0.95, sum(rate(cerebro_pipeline_stage_seconds_bucket{stage="chunkRetrieve"}[5m])) by (le)) > 0.55
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Tenant-filtered retrieval p95 is {{ $value }}s"
+          reason: >-
+            The Phase 6 hard gate (550 ms, architecture §8), watched in production —
+            this is the same number bench/v2/tenancy.bench.js gates in CI, alerting on
+            it live catches a regression that only shows up at production data volumes.
+
+      - alert: AuthFailureSpike
+        expr: rate(cerebro_auth_outcomes_total{outcome="invalid"}[5m]) > 2
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Auth failure rate is {{ $value }}/s"
+          reason: >-
+            ~120 failures/minute is credential stuffing, not a forgetful user — a real
+            user's failed-then-succeeded pattern doesn't sustain this rate for 5 minutes.
+
+      - alert: OtpSendFailures
+        expr: rate(cerebro_otp_outcomes_total{outcome="send_failed"}[10m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "OTP delivery is failing ({{ $labels.channel }})"
+          reason: >-
+            Any sustained send failure means password reset is broken, which is silent
+            from the user's side by design (forgot-password always returns 202) — this
+            is the only signal an operator gets that delivery itself is down.
+
+      - alert: QuotaRejectionsRising
+        expr: rate(cerebro_quota_rejections_total[1h]) > 0.05
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Quota rejections trending up ({{ $labels.limit }})"
+          reason: >-
+            A user hitting a wall repeatedly is a product signal (raise the default? is
+            one tenant abusing the system?), not just an ops one — info severity, not
+            paged.
+
+      - alert: ProjectionFitSlow
+        expr: histogram_quantile(0.95, sum(rate(cerebro_projection_fit_seconds_bucket[15m])) by (le)) > 60
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "UMAP fit p95 is {{ $value }}s"
+          reason: >-
+            The fit is outgrowing the 20k downsample cap (projection/fit.js) — this is
+            the leading indicator that the cap itself needs revisiting before users see
+            the projection console time out.

@@ -30,3 +30,34 @@ export function redisClient() {
 export async function ping() {
   return client.ping();
 }
+
+// Phase 8 §4.2/§8.9: sessions and OTP codes now live in this same Redis (Redis becomes
+// durable, docker-compose.prod.yml). The default `allkeys-lru` would evict session keys
+// under memory pressure, signing users out at random with no error anywhere — this is
+// the config check that names that consequence at boot instead of leaving it to be
+// discovered in production. Called once from api/index.js at startup; logs and does NOT
+// exit — a wrong policy is a real risk, not a reason to refuse to serve traffic the way
+// a missing required env var is (config/index.js's own fail-fast is for values with no
+// safe runtime fallback; this one is operationally recoverable by an operator fixing
+// the Redis config and restarting).
+export async function assertNoEvictionPolicy() {
+  try {
+    const reply = await client.config('GET', 'maxmemory-policy');
+    // ioredis's config() flattens CONFIG GET's RESP array to [key, value, ...] pairs.
+    const policy = reply[1];
+    if (policy !== 'noeviction') {
+      console.error(
+        `[redis] maxmemory-policy is "${policy}", not "noeviction". Under memory ` +
+        `pressure Redis will evict session and OTP keys at random — signed-in users ` +
+        `will be logged out with no error anywhere, and in-flight password resets will ` +
+        `silently fail. Set "maxmemory-policy noeviction" (docker-compose.prod.yml's ` +
+        `redis service already does via its command:) and restart Redis.`,
+      );
+    }
+  } catch (err) {
+    // A CONFIG GET failure (e.g. a managed Redis that disables CONFIG) must not crash
+    // the server over a diagnostic check — log and move on, same posture as the
+    // deliberately-swallowed 'error' listener above.
+    console.error('[redis] could not verify maxmemory-policy:', err.message);
+  }
+}

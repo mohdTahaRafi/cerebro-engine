@@ -8,7 +8,6 @@ import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { Loader2, Mail, User } from 'lucide-react';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { PRODUCT_FEATURE_ROWS } from '../../components/auth/featureRows';
-import { ProviderButton } from '../../components/auth/ProviderButton';
 import { BackendUnreachable } from '../../components/design/BackendUnreachable';
 import { RouteLoading } from '../../components/design/RouteLoading';
 import { PasswordField } from '../../components/design/PasswordField';
@@ -132,7 +131,7 @@ export function Signup() {
                 type="email"
                 inputMode="email"
                 autoComplete="username"
-                placeholder="you@company.com"
+                placeholder="Enter your email"
                 required
                 disabled={pending}
                 value={email}
@@ -204,21 +203,6 @@ export function Signup() {
             ) : 'Create account'}
           </Button>
         </form>
-
-        {capabilities && capabilities.providers.length > 0 && (
-          <>
-            <div className="my-[clamp(0.625rem,1.6vh,1.25rem)] flex items-center gap-3" aria-hidden="true">
-              <div className="h-px flex-1 bg-line" />
-              <span className="text-[13px] text-graphite">or continue with</span>
-              <div className="h-px flex-1 bg-line" />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:[&>*:only-child]:col-span-2">
-              {capabilities.providers.map((p) => (
-                <ProviderButton key={p} provider={p} action="Sign up" className="h-[50px] rounded-[10px] text-[16px]" />
-              ))}
-            </div>
-          </>
-        )}
 
         <p className="mt-[clamp(0.625rem,1.5vh,1.25rem)] text-center text-[15px] text-ink-secondary">
           Already have an account?{' '}

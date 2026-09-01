@@ -92,9 +92,14 @@ async function toApiError(res: Response): Promise<CerebroApiError> {
 
 export async function* streamEvents<E>(path: string, json: unknown, signal: AbortSignal)
   : AsyncGenerator<E> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const csrf = readCookie('cerebro.csrf');            // same double-submit token request()
+  if (csrf) headers['X-CSRF-Token'] = csrf;           //   attaches — requireCsrf (backend
+                                                       //   csrf.js) rejects POST /api/ask
+                                                       //   without it (403 csrf_failed).
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST', credentials: 'include', signal,
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(json),
+    headers, body: JSON.stringify(json),
   });
   if (!res.ok || !res.body) throw await toApiError(res);
 

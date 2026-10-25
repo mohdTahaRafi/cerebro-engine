@@ -1,6 +1,7 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOllama } from '@langchain/ollama';
 import { ChatGroq } from '@langchain/groq';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
 import { recordUsage } from '../telemetry/usage.js';
@@ -13,13 +14,32 @@ import { recordUsage } from '../telemetry/usage.js';
 // zero-local-setup option — a hosted, OpenAI-compatible API with a free tier (no card,
 // 30k tokens/min, 14.4k requests/day as of the models this project targets) — so a
 // deployment needs only an API key, the same shape as the Anthropic path, with none of
-// Ollama's "the host machine IS the inference server" requirement.
+// Ollama's "the host machine IS the inference server" requirement. Gemini (added
+// 2026-10-15, deployment.md §3.5) is the same hosted, key-only shape as Groq, but its
+// models are natively multimodal, so scanned-page sources are read from the page image
+// rather than from OCR text alone.
+
+// Gemini 2.5+ models think before answering, and the thoughts are generated inside the
+// same maxOutputTokens budget as the visible answer — the mechanism that made every
+// gpt-oss condense call return empty text at 150 tokens (condense.js). Callers pass
+// maxTokens as the visible answer they need (condense 1024, generate 2048), so the Gemini
+// branch adds this allowance on top for the thinking. It is a ceiling, not a cost: a call
+// is billed for the tokens it generates, not for the room it was given.
+export const GEMINI_THINKING_HEADROOM = 4096;
 export function chatModel({ temperature = 0, maxTokens = 1024 } = {}) {
   if (config.llm.provider === 'ollama') {
     return new ChatOllama({
       baseUrl: config.llm.ollama.baseUrl,
       model: config.llm.ollama.model,
       temperature,
+    });
+  }
+  if (config.llm.provider === 'gemini') {
+    return new ChatGoogleGenerativeAI({
+      apiKey: config.llm.gemini.apiKey,
+      model: config.llm.gemini.model,
+      temperature,
+      maxOutputTokens: maxTokens + GEMINI_THINKING_HEADROOM,
     });
   }
   if (config.llm.provider === 'groq') {
@@ -71,11 +91,13 @@ export async function ping() {
 // against maxTokens — a tight budget (ping()'s maxTokens: 5) can be fully consumed by
 // reasoning, returning empty content with finish_reason "length" rather than an error.
 // ping() never inspects content, only that the call resolves, so this doesn't break
-// /health; generate.js's maxTokens: 1024 has comfortable headroom for both.
+// /health. condense.js was the exception that did break: its original 150-token budget
+// was consumed by reasoning on every call (raised to 1024 — see its comment).
 const VISION_MODEL_PATTERN = /vision|llava|llama3\.2-vision|qwen2?-vl|scout|maverick/i;
 
 export function supportsVision(providerConfig) {
   if (providerConfig.provider === 'anthropic') return true;
+  if (providerConfig.provider === 'gemini') return true;   // every current Gemini model takes images
   if (providerConfig.provider === 'groq') return VISION_MODEL_PATTERN.test(providerConfig.groq.model);
   return VISION_MODEL_PATTERN.test(providerConfig.ollama.model);
 }

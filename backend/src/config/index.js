@@ -60,7 +60,7 @@ export const config = {
   llamaParse: { apiKey: required('LLAMA_CLOUD_API_KEY') },
 
   llm: {
-    provider: process.env.LLM_PROVIDER ?? 'anthropic', // 'anthropic' | 'ollama' | 'groq'
+    provider: process.env.LLM_PROVIDER ?? 'anthropic', // 'anthropic' | 'ollama' | 'groq' | 'gemini'
     anthropic: {
       apiKey: process.env.ANTHROPIC_API_KEY,
       model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',
@@ -81,6 +81,15 @@ export const config = {
     groq: {
       apiKey: process.env.GROQ_API_KEY,
       model: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
+    },
+    // Google AI Studio key (aistudio.google.com/apikey) — deployment.md §3.5. Same lesson
+    // as the Groq comment above: the model must be one the key can actually reach, so
+    // check `GET https://generativelanguage.googleapis.com/v1beta/models` (header
+    // x-goog-api-key) before changing GEMINI_MODEL. gemini-2.5-flash is the default for
+    // its free-tier availability, speed, and native image input.
+    gemini: {
+      apiKey: process.env.GEMINI_API_KEY,
+      model: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
     },
   },
 
@@ -145,6 +154,10 @@ if (config.llm.provider === 'anthropic' && !config.llm.anthropic.apiKey) {
 }
 if (config.llm.provider === 'groq' && !config.llm.groq.apiKey) {
   console.error('[config] LLM_PROVIDER=groq requires GROQ_API_KEY.');
+  process.exit(1);
+}
+if (config.llm.provider === 'gemini' && !config.llm.gemini.apiKey) {
+  console.error('[config] LLM_PROVIDER=gemini requires GEMINI_API_KEY.');
   process.exit(1);
 }
 

@@ -118,7 +118,10 @@ export async function generateNode(state, config) {
     { role: 'system', kind: 'text', content: SYSTEM_PROMPT, approxTokens: tokenLength(SYSTEM_PROMPT) },
     ...userBlocks,
   ];
-  const modelName = appConfig.llm.provider === 'anthropic' ? appConfig.llm.anthropic.model : appConfig.llm.ollama.model;
+  // Every provider block in config.llm carries its own `model` — read the active one. (This
+  // used to be "anthropic, else ollama", which recorded the Ollama model name on every
+  // Groq-generated trace.)
+  const modelName = appConfig.llm[appConfig.llm.provider]?.model ?? null;
 
   let answer = '', firstTokenMs = null, usage = null;
   try {
@@ -133,7 +136,10 @@ export async function generateNode(state, config) {
     for await (const chunk of stream) {
       if (chunk.usage_metadata) usage = chunk.usage_metadata;   // only the final chunk is
                                                                  // guaranteed to carry totals
-      const token = chunk.content;
+      // `.text`, not `.content`: a provider may stream content as an array of parts
+      // (Gemini can), and `answer += [...]` would write "[object Object]" into the answer.
+      // For a plain-string chunk the two are identical.
+      const token = chunk.text;
       if (!token) continue;
       firstTokenMs ??= Math.round(performance.now() - t0);
       answer += token;

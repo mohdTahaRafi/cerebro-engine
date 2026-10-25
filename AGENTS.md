@@ -9,7 +9,7 @@ Tesseract OCR + ColPali for scanned pages), chunked, embedded with Cohere's
 sparse (local BM25) vector search server-side via Qdrant's RRF, adds ColPali multivector
 retrieval for scanned pages, and reranks everything with Cohere Rerank v3. A LangGraph
 state machine (condense → retrieve → rerank → generate) drives conversational, streaming,
-grounded answers via Claude, Groq, or a local Ollama model over SSE.
+grounded answers via Claude, Groq, Gemini, or a local Ollama model over SSE.
 
 **v2** turns this from a single-tenant tool into a multi-user platform: every user signs in
 (local password or Google/GitHub OAuth), owns their own contexts (folders of documents,
@@ -215,7 +215,7 @@ build`, but no configured unit-test, lint, or type-check script.
   warning — never exits — if Redis's `maxmemory-policy` isn't `noeviction`. Sessions and
   OTP codes live in Redis now; the default `allkeys-lru` evicts them under memory
   pressure with no error anywhere, which reads as users being randomly signed out.
-- "Offline" is not absolute: Cohere, LlamaParse, Anthropic/Groq (or a remote Ollama), and
+- "Offline" is not absolute: Cohere, LlamaParse, Anthropic/Groq/Gemini (or a remote Ollama), and
   LangSmith tracing are all live network dependencies by default; only the vector index
   (Qdrant), the document/metadata store (MongoDB), the queue (Redis), and OCR/ColPali
   (the vision service) run locally. **This project's `COHERE_API_KEY` is trial-tier,

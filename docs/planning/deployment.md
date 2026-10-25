@@ -197,6 +197,47 @@ for it in per-host setup. This deployment just isn't optimizing for that propert
 not have the ability to sign up for third-party services or hold API keys on the user's behalf, and
 `.env` is not edited without explicit instruction.
 
+
+### 3.5 Gemini as a Fourth `LLM_PROVIDER` (amended 2026-10-15)
+
+**Decision: add Google Gemini as a fourth provider, selected the same way as the others —
+`LLM_PROVIDER=gemini` plus `GEMINI_API_KEY`.** Gemini has Groq's key-only shape (no local
+model, no `host.docker.internal`), and adds what Groq's default lacks: every current Gemini
+model takes images, so `supportsVision()` returns `true` and scanned-page sources are read
+from the page JPEG rather than from OCR text alone (phase 5 §7.3). The model is
+`GEMINI_MODEL`, default `gemini-2.5-flash` — chosen for free-tier availability, latency, and
+native image input. As with Groq (§3.4), the reachable model list is per key: confirm with
+`GET https://generativelanguage.googleapis.com/v1beta/models` (header `x-goog-api-key`)
+before changing it.
+
+| File | Change |
+|---|---|
+| `backend/package.json` | `@langchain/google-genai` `~2.2.0` — the newest release whose peer range (`@langchain/core ^1.2.0`) accepts the installed core 1.2.8; 2.3.x requires core ≥1.2.9 |
+| `backend/src/config/index.js` | `config.llm.gemini = { apiKey, model }`; fail-fast if `LLM_PROVIDER=gemini` and the key is unset |
+| `backend/src/providers/llm.js` | `chatModel()` gains a `gemini` branch; `maxOutputTokens = maxTokens + GEMINI_THINKING_HEADROOM (4096)`, because Gemini 2.5+ thinks inside the output budget — the failure mode that emptied every gpt-oss condense call at 150 tokens |
+| `backend/src/graph/nodes/generate.js` | streams `chunk.text` instead of `chunk.content` (Gemini may stream an array of parts); trace `model` now read from the active provider's block (was "anthropic, else ollama", which mislabeled every Groq trace) |
+| `.env.example`, `backend/.env.example` | `GEMINI_API_KEY=`, `GEMINI_MODEL=gemini-2.5-flash` |
+| `docker-compose.prod.yml` | backend service forwards `GEMINI_API_KEY`/`GEMINI_MODEL` |
+
+**Key.** Create one at `aistudio.google.com/apikey` (a key dedicated to Cerebro, so revoking
+it never breaks another app sharing the AI Studio project). Set `LLM_PROVIDER=gemini` and
+`GEMINI_API_KEY` in **both** `.env` files for the same reason §5 step 1 gives for Groq: the dev
+backend reads `backend/.env`, the production stack reads the root `.env`.
+
+**Free tier.** The AI Studio project this deployment's key lives in has billing disabled
+(`gcloud billing projects describe` → `billingEnabled: false`), so requests are subject to
+the Gemini free tier's per-model requests-per-minute and requests-per-day limits, shown in AI
+Studio. Each question costs two calls (condense + generate). Google's terms for unpaid
+Gemini API use have historically allowed submitted content to be used to improve Google's
+products — review the current terms before pointing a multi-user deployment, whose users
+upload private documents, at a free-tier key; a billing-enabled key is the alternative.
+
+**Verification status.** Wiring verified without a key: the adapter constructs with the
+configured model, `supportsVision()` reports `true`, and a call with a placeholder key reaches
+`.../v1beta/models/gemini-2.5-flash:generateContent` and is rejected `400 API key not valid`.
+A generation with a real key, and the thinking headroom against live usage metadata, are the
+remaining checks once `GEMINI_API_KEY` is set.
+
 ---
 
 ## 4. What This Deployment Does and Does Not Prove

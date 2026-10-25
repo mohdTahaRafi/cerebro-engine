@@ -168,6 +168,13 @@ export async function ingestDocumentJob(job) {
         { ...base, sourceKind: 'ocr' },          // marks provenance for merge.js's dedup
       ),
     ];
+    // Renumber across BOTH chunkPages calls. Each call numbers its own chunks from 0, and
+    // vectorStore.js derives the Qdrant point id from (documentId, position) — so without
+    // this, the OCR chunks' positions 0..k collided with the first k text chunks' ids and
+    // the later upsert silently overwrote them. Verified live: a 21-page proposal with
+    // scanned pages 6 and 9 kept 19 of its 21 chunks, losing pages 1–2 (the author block)
+    // to the OCR chunks of pages 6 and 9, which carried positions 0 and 1.
+    chunks.forEach((chunk, i) => { chunk.position = i; });
     if (!routing.textPages) await doc.updateOne({ pageCount: parsed.length });   // non-PDF: unset by step 1
     await updateProgress(doc, job, 85, 'embedding');
 

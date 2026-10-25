@@ -10,7 +10,7 @@
 // layout or paint. Tailwind class names are asserted as *present*, not as producing any
 // particular visual result. A human still has to look at it once.
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -83,7 +83,10 @@ async function renderComponents() {
   // require('stream') into a stub that throws; left external, Node resolves it by walking up
   // from the bundle's own location, which only finds frontend/node_modules from inside the
   // project tree.
-  const dir = await mkdtemp(path.join(ROOT, 'node_modules', '.cache', 'cerebro-render-'));
+  // A fresh `npm ci` has no node_modules/.cache yet, and mkdtemp does not create parents.
+  const cacheDir = path.join(ROOT, 'node_modules', '.cache');
+  await mkdir(cacheDir, { recursive: true });
+  const dir = await mkdtemp(path.join(cacheDir, 'cerebro-render-'));
   const outPath = path.join(dir, 'bundle.cjs');
 
   await build({

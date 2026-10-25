@@ -1,7 +1,7 @@
 // phase_4 §5.1 — waiting/active/failed/completed are real (`/api/health`'s `queue`).
 // Phase 7 §5.1 makes throughput/worker concurrency/oldest-waiting-age real too
 // (`/api/admin/queue`, backed by the Redis sorted set backend/src/telemetry/throughput.js
-// maintains) — no longer a <MockBadge> row.
+// maintains) — no longer mocked.
 import type { QueueStats } from '../../../api/contracts';
 
 interface RealQueue { waiting: number; active: number; failed: number; completed: number }

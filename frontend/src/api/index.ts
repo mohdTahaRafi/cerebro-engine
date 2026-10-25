@@ -1,8 +1,6 @@
-// phase_1 §4.4 — the only module components import from. Because
-// `import.meta.env.DEV` is `false` at production build time, Vite's constant folding
-// removes the entire MOCK_ON branch, and with it the dynamic import — so `src/api/mock/**`
-// and every fixture it references is absent from the production bundle (verified by
-// task 1.17).
+// phase_1 §4.4 — the only module components import from. Every endpoint module talks to
+// the real backend; the dev-only mock adapter this file once switched to (VITE_API_MOCK=1)
+// was emptied endpoint by endpoint as Phases 2–7 landed real routes, and then deleted.
 import { auth } from './endpoints/auth';
 import { documents } from './endpoints/documents';
 import { threads } from './endpoints/threads';
@@ -13,15 +11,7 @@ import { traces } from './endpoints/traces';
 import { vectors } from './endpoints/vectors';
 import { admin } from './endpoints/admin';
 
-const real = { auth, documents, threads, chat, health, contexts, traces, vectors, admin };
-
-const MOCK_ON = import.meta.env.DEV && import.meta.env.VITE_API_MOCK === '1';
-
-export const api = MOCK_ON
-  ? (await import('./mock')).mockApi
-  : real;
-
-export const IS_MOCKED = MOCK_ON;
+export const api = { auth, documents, threads, chat, health, contexts, traces, vectors, admin };
 
 export * from './contracts';
 export { CerebroApiError, EndpointUnavailableError } from './client';

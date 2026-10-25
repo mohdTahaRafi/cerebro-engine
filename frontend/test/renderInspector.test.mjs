@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // Mirrors backend/src/telemetry/pipelineTelemetry.js's output for a first-turn text-only
-// query: condense skipped (no history), colpali + pageRetrieve skipped (no visual corpus),
+// query: condense skipped (no history, no documents), colpali + pageRetrieve skipped (no visual corpus),
 // generate present. Offsets are real values captured from a live /api/ask run — same fixture
 // the original test used, so the geometry assertions below carry over unchanged.
 const TELEMETRY = {
@@ -186,7 +186,7 @@ ok &= test('skipped stages are hatched, labeled "skipped", and name their reason
   assert.ok(waterfall.includes('repeating-linear-gradient'), 'skipped stages must use a hatch fill');
   const skippedLabels = waterfall.match(/>skipped</g) ?? [];
   assert.equal(skippedLabels.length, 3, `expected 3 "skipped" value labels, got ${skippedLabels.length}`);
-  assert.ok(waterfall.includes('first turn — no history to condense'), 'condense must explain why it was skipped');
+  assert.ok(waterfall.includes('nothing to resolve — no history, no documents'), 'condense must explain why it was skipped');
   assert.ok(waterfall.includes('vision service unavailable or no visual corpus'), 'colpali must explain why it was skipped');
 });
 

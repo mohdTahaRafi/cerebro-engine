@@ -1,25 +1,80 @@
-// condense — rewrites a follow-up question into a standalone one using thread history
-// (phase 5 §5). Only reached when history is non-empty (ragGraph.js's conditional edge
-// skips this node entirely on a first turn).
+// condense — rewrites the user's question into a standalone search query using thread
+// history and the context's document names (phase 5 §5, amended 2026-10-15). Runs on
+// every turn, including the first: a first question can be just as vague ("who is the
+// person?" in a one-document context) and the document list is what resolves it. The only
+// turn it skips the LLM call on is one with no history AND no ready documents — there is
+// nothing to resolve the question against, and retrieval will refuse an empty corpus anyway.
 import * as llm from '../../providers/llm.js';
+import { Document } from '../../models/Document.js';
 import { CONDENSE_PROMPT } from '../prompts.js';
 
-export const CONDENSE_MAX_TOKENS = 150;
+// A file name is ~10–20 tokens, so 25 names stay under ~500 prompt tokens. Past ~25 a
+// vague "the document" can't be pinned to one file anyway; the most recently updated ones
+// are listed because a follow-up is most likely about what the user just uploaded.
+export const MAX_LISTED_DOCUMENTS = 25;
+
+// Ready documents in the request's context, by file name. `contextId: null` is the
+// deliberate user-wide scope (vectorStore.js §2) and lists across all the user's contexts.
+// A lookup failure degrades to an empty list rather than failing the turn — condensation
+// is an optimization, never a requirement (see the catch in condenseNode).
+async function loadDocumentNames(tenant) {
+  if (!tenant?.userId) return [];
+  try {
+    const filter = { userId: tenant.userId, status: 'ready' };
+    if (tenant.contextId) filter.contextId = tenant.contextId;
+    const docs = await Document.find(filter)
+      .sort({ updatedAt: -1 })
+      .limit(MAX_LISTED_DOCUMENTS)
+      .select('fileName')
+      .lean();
+    return docs.map((d) => d.fileName);
+  } catch (err) {
+    console.warn('[condense] could not list context documents:', err.message);
+    return [];
+  }
+}
+
+// 1024, not the original 150: reasoning models (Groq's openai/gpt-oss-120b, the configured
+// provider) spend hidden reasoning tokens out of the same max_tokens budget before emitting
+// any visible text. Verified live: at 150 every condense call hit finish_reason 'length'
+// with empty content, so the guardrail below rejected it and every follow-up ("who is the
+// person?") was retrieved on its raw, context-free wording. At 1024 the same call stops
+// naturally at ~200 tokens. The cap is a ceiling, not a cost — the length guardrail below
+// still rejects a runaway rewrite.
+export const CONDENSE_MAX_TOKENS = 1024;
 export const CONDENSE_TEMPERATURE = 0;
 
 export async function condenseNode(state, config) {
   const t0 = performance.now();
+  const history = state.history ?? [];
+  // `documentNames` on the incoming state is a test seam (test/graph/condense.test.js
+  // calls this node directly, with no Mongo connection); it is not a graph channel, so
+  // under ragGraph it is always undefined and the names come from the context.
+  const documentNames = state.documentNames ?? await loadDocumentNames(state.tenant);
+
+  if (history.length === 0 && documentNames.length === 0) {
+    return { condensedQuery: state.query, warnings: [] };
+  }
+
   const model = llm.chatModel({ temperature: CONDENSE_TEMPERATURE, maxTokens: CONDENSE_MAX_TOKENS });
 
   try {
+    // Replacement *functions*, not strings: String.prototype.replace interprets `$&`,
+    // `$'` and friends inside a replacement string, and both file names and chat
+    // messages are user-controlled text that can contain them.
     const res = await model.invoke(
       CONDENSE_PROMPT
-        .replace('{history}', state.history.map((m) => `${m.role}: ${m.content}`).join('\n'))
-        .replace('{question}', state.query),
+        .replace('{documents}', () => (documentNames.length > 0
+          ? documentNames.map((name) => `- ${name}`).join('\n')
+          : '(no documents listed)'))
+        .replace('{history}', () => (history.length > 0
+          ? history.map((m) => `${m.role}: ${m.content}`).join('\n')
+          : '(no earlier messages)'))
+        .replace('{question}', () => state.query),
       { signal: config?.signal },
     );
 
-    const condensed = res.content.trim();
+    const condensed = res.text.trim();   // `.text`: string or multi-part content alike
 
     // Guardrail: a condenser that returns something absurdly long or empty has
     // misbehaved (it summarized the conversation instead of rewriting the question).

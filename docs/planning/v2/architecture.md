@@ -203,7 +203,7 @@ subsystem this platform adds.
     (`404`, not `403`, if it does not — a `403` confirms the context exists, which is a
     cross-tenant existence oracle). It opens the SSE response, emits `threadId` immediately,
     and invokes the graph with `{query, tenant: {userId, contextId}, threadId}`.
-14. **Graph** runs `loadHistory` → `condense` (skipped on turn 1) → `retrieve`. `retrieve`
+14. **Graph** runs `loadHistory` → `condense` (every turn since 2026-10-15; v1 architecture §5.6) → `retrieve`. `retrieve`
     calls `vectorStore.hybridQuery({tenant, denseVector, sparseVector, limit})`. Inside, the
     tenant becomes a Qdrant filter `must: [{key:'userId',match:{value}}, {key:'contextId',match:{value}}]`
     applied **inside each prefetch branch and again at the top level** — branch-level filtering

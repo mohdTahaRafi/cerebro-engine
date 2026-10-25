@@ -7,22 +7,18 @@
 // literally omits/includes the `condense` span for turn 1 vs turn 2 is an integration
 // check against a running stack with LANGCHAIN_TRACING_V2=true, not exercised here.
 import assert from 'assert';
-import { ragGraph, routeAfterHistory, routeAfterRerank } from '../../src/graph/ragGraph.js';
+import { ragGraph, routeAfterRerank } from '../../src/graph/ragGraph.js';
 
-// ── First turn: no history -> retrieve directly, condense is skipped ───────────────
-assert.strictEqual(
-  routeAfterHistory({ history: [] }), 'retrieve',
-  'a first turn (empty history) must route straight to retrieve, skipping condense',
+// ── Every turn condenses (amended 2026-10-15): loadHistory -> condense, unconditionally ─
+// First turns used to skip condense; a vague first question ("who is the person?") then
+// reached retrieval verbatim. condenseNode now decides internally whether an LLM call is
+// needed, so the edge itself is unconditional.
+const edgesFromHistory = (await ragGraph.getGraphAsync()).edges.filter((e) => e.source === 'loadHistory').map((e) => e.target);
+assert.deepStrictEqual(
+  edgesFromHistory, ['condense'],
+  `loadHistory must have exactly one outgoing edge, to condense; got ${JSON.stringify(edgesFromHistory)}`,
 );
-console.log('[routing.test] PASS — first turn (history.length === 0) routes to retrieve');
-
-// ── Second+ turn: any history -> condense first ─────────────────────────────────────
-assert.strictEqual(
-  routeAfterHistory({ history: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hi' }] }),
-  'condense',
-  'any non-empty history must route through condense before retrieval',
-);
-console.log('[routing.test] PASS — follow-up turn (history.length > 0) routes to condense');
+console.log('[routing.test] PASS — every turn (first or follow-up) routes loadHistory -> condense');
 
 // ── Rerank produced nothing -> noContext, generation model is never called ─────────
 assert.strictEqual(

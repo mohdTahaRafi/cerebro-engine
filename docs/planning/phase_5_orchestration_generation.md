@@ -55,10 +55,11 @@ const graph = new StateGraph(RagState)
 
   .addEdge(START, 'loadHistory')
 
-  // Skip the condensation LLM call entirely on the first turn (architecture §5.6).
-  .addConditionalEdges('loadHistory', (s) => (s.history.length === 0 ? 'retrieve' : 'condense'), {
-    condense: 'condense', retrieve: 'retrieve',
-  })
+  // Amended 2026-10-15 (architecture §5.6): every turn condenses. The original first-turn
+  // skip was `.addConditionalEdges('loadHistory', (s) => (s.history.length === 0 ?
+  // 'retrieve' : 'condense'), ...)`; condenseNode now skips the LLM call itself when there
+  // is neither history nor a document to resolve the question against.
+  .addEdge('loadHistory', 'condense')
   .addEdge('condense', 'retrieve')
   .addEdge('retrieve', 'rerank')
 
@@ -102,6 +103,8 @@ Sorting descending with a limit and then reversing in memory takes the **most re
 ---
 
 ## 5. Node: `condense`
+
+> **Amendment (2026-10-15).** The prompt and budget in the block below are the originals and are superseded. Live failures, in order: `CONDENSE_MAX_TOKENS = 150` was consumed entirely by a reasoning model's hidden reasoning (Groq `openai/gpt-oss-120b`: `finish_reason: length`, empty content on every call), so every follow-up fell back to the raw question — raised to **1024**. With that fixed, the prompt's "preserve terminology exactly / return a standalone question unchanged" let the model return "who is the person?" verbatim, so retrieval never reached the title page holding the name. The node now also runs on first turns and receives the context's ready document names (up to `MAX_LISTED_DOCUMENTS = 25`, most recently updated first), skipping the LLM call only when there is no history and no document. Current prompt, verbatim, in architecture §5.6; acceptance is `condense.test.js` cases 3–4 (a vague first turn and a vague follow-up must both name the single listed document; no history and no documents must make no LLM call).
 
 ```js
 const CONDENSE_PROMPT = `Given the conversation history and a follow-up question, rewrite the follow-up as a standalone question that can be understood without the history. Preserve the user's original intent and terminology exactly. If the follow-up is already standalone, return it unchanged. Return only the rewritten question, nothing else.
@@ -156,7 +159,7 @@ export async function condenseNode(state) {
 
 ### 5.1 The Topic-Switch Case
 
-FR-CONV's edge case "abrupt topic change mid-thread" is handled by the prompt's `If the follow-up is already standalone, return it unchanged` instruction rather than by a classifier. A genuinely new question (`"what is our parental leave policy?"` after three turns about revenue) is already standalone, so the condenser returns it untouched and the stale context never reaches retrieval. This is why the instruction is in the prompt rather than left implicit — without it, models reliably drag prior topics into the rewrite.
+FR-CONV's edge case "abrupt topic change mid-thread" is handled by the prompt's `If the follow-up is already standalone, return it unchanged` instruction (rule 4 of the amended prompt: `If the question is already specific and needs no context, return it unchanged` — still asserted by `condense.test.js` case 2) rather than by a classifier. A genuinely new question (`"what is our parental leave policy?"` after three turns about revenue) is already standalone, so the condenser returns it untouched and the stale context never reaches retrieval. This is why the instruction is in the prompt rather than left implicit — without it, models reliably drag prior topics into the rewrite.
 
 ---
 
@@ -532,8 +535,8 @@ frontend/src/app/
 
 backend/test/graph/
 ├── state.test.js                     # Reducer merge/append semantics
-├── condense.test.js                  # Pronoun resolution, topic switch, guardrail, failure fallback
-├── routing.test.js                   # First turn skips condense; empty sources route to noContext
+├── condense.test.js                  # Pronoun resolution, topic switch, vague reference vs. document list, no-call pass-through, failure fallback
+├── routing.test.js                   # Every turn routes to condense (amended 2026-10-15); empty sources route to noContext
 └── sse.test.js                       # Event ordering, heartbeat, abort on client close
 ```
 

@@ -35,7 +35,37 @@ assert.ok(
 );
 console.log('[condense.test] PASS — topic switch stayed standalone:', switched.condensedQuery);
 
-// ── 3. Failure fallback: an invalid key must not fail the request ──────────────────
+// ── 3. Vague reference + one listed document (amended 2026-10-15) ──────────────────
+// The live failure this case pins: "who is the person?" in a context holding a single
+// proposal came back from condense verbatim, so retrieval searched the raw words and never
+// reached the title page carrying the author's name. It must now name the document — on a
+// first turn (no history at all), which used to skip condense entirely, and as a follow-up
+// whose history no longer mentions the file.
+const ONE_DOC = ['New_Users_Anti_Spammer_System_meet_jain.pdf'];
+const NAMES_THE_DOC = /anti[\s_-]*spam/i;
+for (const [label, history] of [
+  ['first turn', []],
+  ['follow-up', [
+    { role: 'user', content: 'it is about whom?' },
+    { role: 'assistant', content: 'The sources do not identify a specific person.' },
+  ]],
+]) {
+  const vague = await condenseNode({ query: 'who is the person?', history, documentNames: ONE_DOC }, {});
+  assert.ok(
+    NAMES_THE_DOC.test(vague.condensedQuery),
+    `${label}: a vague reference in a one-document context must name that document, got: "${vague.condensedQuery}"`,
+  );
+  assert.strictEqual(vague.warnings.length, 0, `${label}: a successful condensation must not warn`);
+  console.log(`[condense.test] PASS — vague ${label} resolved to the document:`, vague.condensedQuery);
+}
+
+// ── 4. Nothing to resolve against: no history, no documents -> no LLM call ─────────
+const bare = await condenseNode({ query: 'who is the person?', history: [], documentNames: [] }, {});
+assert.strictEqual(bare.condensedQuery, 'who is the person?', 'with no history and no documents the query passes through');
+assert.strictEqual(bare.timings, undefined, 'no LLM call is made, so no condense timing is reported (the stage shows as skipped)');
+console.log('[condense.test] PASS — no history and no documents: passed through without an LLM call');
+
+// ── 5. Failure fallback: an invalid key must not fail the request ──────────────────
 if (config.llm.provider === 'anthropic') {
   const savedKey = config.llm.anthropic.apiKey;
   config.llm.anthropic.apiKey = 'sk-ant-invalid-test-key';

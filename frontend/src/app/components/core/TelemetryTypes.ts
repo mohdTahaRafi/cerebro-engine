@@ -1,5 +1,5 @@
 // PipelineTelemetry — mirrors backend/src/telemetry/pipelineTelemetry.js exactly (phase 6
-// §2.1). Every `| null` here is load-bearing: a skipped stage (condense on a first turn,
+// §2.1). Every `| null` here is load-bearing: a skipped stage (condense with no history and no documents,
 // colpali with no visual corpus, rerank while degraded) is `null`, never `0` — a `0` would
 // be indistinguishable from an instantaneous stage in the waterfall below.
 //
@@ -9,7 +9,7 @@
 // could only reconstruct bar positions by stacking durations, which is precisely the
 // layout §2.2 forbids.
 export interface PipelineTelemetry {
-  condenseMs: number | null;            // null => skipped (first turn)
+  condenseMs: number | null;            // null => skipped (no history and no documents to resolve against)
   condenseStartMs: number | null;
   embedMs: number | null;               // Cohere query embedding (dense)
   embedStartMs: number | null;
@@ -54,7 +54,7 @@ export interface StageSpec {
 }
 
 export const STAGES: StageSpec[] = [
-  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', colorVar: 'bg-stage-condense', skippedReason: 'first turn — no history to condense' },
+  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', colorVar: 'bg-stage-condense', skippedReason: 'nothing to resolve — no history, no documents' },
   { durationKey: 'embedMs', startKey: 'embedStartMs', label: 'embed', parallelGroup: 'encode', colorVar: 'bg-stage-embed', skippedReason: 'query embedding unavailable' },
   { durationKey: 'sparseMs', startKey: 'sparseStartMs', label: 'sparse', parallelGroup: 'encode', colorVar: 'bg-stage-sparse', skippedReason: 'sparse encoding unavailable' },
   { durationKey: 'colpaliMs', startKey: 'colpaliStartMs', label: 'colpali', parallelGroup: 'encode', colorVar: 'bg-stage-colpali', skippedReason: 'vision service unavailable or no visual corpus' },

@@ -16,7 +16,7 @@ The legacy `ExecutionPlan.tsx` gated its entire panel on a `telemetry` object wi
 
 ```ts
 export interface PipelineTelemetry {
-  condenseMs:      number | null;   // null ⇒ skipped (first turn) — not zero
+  condenseMs:      number | null;   // null ⇒ skipped (no history and no documents; was: first turn — amended 2026-10-15) — not zero
   embedMs:         number;          // Cohere query embedding
   sparseMs:        number;          // local BM25, typically 2-4ms
   colpaliMs:       number | null;   // null ⇒ vision unavailable or no visual corpus

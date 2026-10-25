@@ -22,7 +22,7 @@ interface StageSpec {
 // system. --stage-* tokens are categorical, not semantic (theme.css) — a segment's color
 // names which stage it is, never whether that stage went well.
 const STAGE_SPECS: StageSpec[] = [
-  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', colorVar: 'bg-stage-condense', skippedReason: 'first turn — no history to condense' },
+  { durationKey: 'condenseMs', startKey: 'condenseStartMs', label: 'condense', colorVar: 'bg-stage-condense', skippedReason: 'nothing to resolve — no history, no documents' },
   { durationKey: 'embedMs', startKey: 'embedStartMs', label: 'embed', colorVar: 'bg-stage-embed', skippedReason: 'query embedding unavailable' },
   { durationKey: 'sparseMs', startKey: 'sparseStartMs', label: 'sparse', colorVar: 'bg-stage-sparse', skippedReason: 'sparse encoding unavailable' },
   { durationKey: 'colpaliMs', startKey: 'colpaliStartMs', label: 'colpali', colorVar: 'bg-stage-colpali', skippedReason: 'vision service unavailable or no visual corpus' },

@@ -203,6 +203,10 @@ export type ProjectionStaleness = 'fresh' | 'rebuilding' | 'absent';
 export interface ProjectionResponse {
   staleness: ProjectionStaleness;
   reason: string | null;              // populated when staleness !== 'fresh'
+  /** A fit is queued or running for this context right now. The one thing the client
+   *  cannot derive: 'absent' covers both "the first fit was just enqueued" (poll) and
+   *  "the fit failed and will never finish on its own" (stop polling, offer Rebuild). */
+  pending: boolean;
   nodeCount: number;
   positions: string;
   docIndex: string;
@@ -218,9 +222,14 @@ export interface ProjectQueryResponse {
                      rerankScore: number | null; finalRank: number | null }>;
 }
 export interface VectorNodeDetail {
-  pointId: string; text: string; documentId: string; fileName: string;
-  page: number | null; headingPath: string | null; position: number;
-  norm: number; neighborCount: number;
+  pointId: string; text: string; documentId: string;
+  // Nullable to match what the route actually sends: a chunk payload predating the
+  // fileName denormalization has none, and `norm` is null for a point stored without its
+  // dense vector. Typing them non-null made `detail.norm.toFixed()` look safe when it
+  // was not.
+  fileName: string | null;
+  page: number | null; headingPath: string | null; position: number | null;
+  norm: number | null; neighborCount: number;
 }
 
 // ── Admin (Epic 6) ──────────────────────────────────────────────────────────

@@ -354,14 +354,36 @@ interesting thing the beacon can show.
 `GET /api/vectors/projection` compares `fittedChunkCount` against the context's current
 `chunkCount` and reports:
 
-| Condition | `staleness` | `reason` |
-|---|---|---|
-| no `Projection` row | `absent` | *"No projection has been computed for this context."* |
-| `status: 'fitting'` | `rebuilding` | *"Rebuilding — {n} new chunks aren't plotted yet."* |
-| `status: 'failed'` | `absent` | the stored reason verbatim |
-| counts equal | `fresh` | `null` |
-| counts differ, not fitting | `rebuilding` | *"{n} chunks were added since this was fitted."* + a rebuild is enqueued |
-| downsampled at fit time | `fresh` | *"Showing 20,000 of 47,331 chunks."* |
+| Condition | `staleness` | `pending` | `reason` |
+|---|---|---|---|
+| no `Projection` row | `absent` | `true` | *"No projection has been computed for this context yet — fitting it now."* |
+| `status: 'fitting'`, {n} new chunks | `rebuilding` | `true` | *"Rebuilding — {n} new chunks aren't plotted yet."* |
+| `status: 'fitting'`, no count change | `rebuilding` | `true` | *"Refitting this projection — the cloud below is the previous fit."* |
+| `status: 'failed'` | `absent` | `false` | the stored reason verbatim |
+| counts equal | `fresh` | `false` | `null` |
+| counts differ, not fitting | `rebuilding` | `true` | *"{n} chunks were added since this was fitted."* + a rebuild is enqueued |
+| downsampled at fit time | `fresh` | `false` | *"Showing 20,000 of 47,331 chunks."* |
+
+**`pending` was added after Phase 7 shipped** (originally the payload carried only
+`staleness` + `reason`). `staleness: 'absent'` covers two states that are identical on the
+wire and require opposite client behavior: a first fit that was just enqueued (the console
+should poll — a cloud is seconds away) and a fit that FAILED and will never complete on its
+own (the console should stop polling, show the reason, and offer Rebuild). Without it the
+console could only guess — by sniffing the reason string, or by burning a fixed retry budget
+on every visit to a context that will never fit. The server already knows the answer, so it
+states it.
+
+Two `'fitting'` rows are distinguished by whether the chunk count actually moved: the
+count-based wording renders an explicit Rebuild of an unchanged corpus as *"0 new chunks
+aren't plotted yet"*, a sentence that describes nothing and reads like a bug.
+
+`'fitting'` is also **verified against the queue, not trusted**. The flag is written by
+`enqueueProjectionRebuild` before the job is confirmed enqueued, so anything that loses the
+job afterwards strands the row in `'fitting'` permanently — the console reports
+*"Rebuilding…"* forever and `POST /api/vectors/query` stays 409-blocked, with no action the
+user can take. The GET route calls `hasPendingFit(contextId)` and re-enqueues when the claim
+is no longer true. (`hasPendingFit` answers `true` while Redis is unreachable, so an outage
+waits rather than enqueueing a rebuild per page load.)
 
 ### 4.5 The rebuild job
 
@@ -369,6 +391,19 @@ BullMQ queue `projection`, concurrency **1** across the whole process. Jobs are 
 per context with `jobId: \`projection-${contextId}\`` and `removeOnComplete` — BullMQ drops a
 duplicate id while one is pending, so a user re-uploading 50 documents produces one fit, not
 fifty ([architecture.md §9](architecture.md)).
+
+**Correction to the above, found in production:** BullMQ's jobId dedup is not limited to
+*pending* jobs — it covers **finished** ones too, and `removeOnComplete: { age: 86_400 }`
+keeps a completed fit's key in Redis for 24 hours. A second `.add()` with that jobId any
+time inside the window is a **silent no-op** that returns the old, already-completed job.
+Verified live: one worker run for two adds, and removing the finished job in between
+restores the second run. Because `enqueueProjectionRebuild` flips the row to `'fitting'`
+before adding, a dropped add is not merely a skipped rebuild — it strands the row in
+`'fitting'` forever (three rows in the dev deployment's own database were in exactly that
+state, one of them showing 28 of a context's 110 chunks for two weeks). `enqueueProjectionRebuild`
+therefore checks the existing job's state first: a `waiting`/`active`/`delayed` job is real
+dedup and the add is skipped; a `completed`/`failed` one is removed before adding. The
+dedup this section describes — concurrent uploads collapsing into one fit — is unchanged.
 
 > **Amendment (implementation).** The dedup key uses a dash, not the colon this section
 > originally specified: BullMQ's `Job` rejects any custom id containing `:` ("Custom Id

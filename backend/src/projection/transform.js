@@ -19,6 +19,7 @@
 // in umap-js — the beacon lands in a subtly different coordinate space than the cloud
 // it is drawn into. It looks fine. It means nothing.
 import * as vectorStore from '../providers/vectorStore.js';
+import { unpackPositions } from './pack.js';
 
 const BEACON_K = 12;          // enough neighbors to be robust to one outlier, few enough
                               //   that the centroid stays local rather than drifting to
@@ -34,6 +35,20 @@ const SOFTMAX_TEMPERATURE = 0.07;   // tuned so the top neighbor dominates witho
 // stack — production call sites (routes/vectors.js) never pass this option.
 export async function projectQuery(tenant, queryVector, projection, { nearestDense = vectorStore.nearestDense } = {}) {
   const hits = await nearestDense(tenant, queryVector, BEACON_K);  // Qdrant ANN
+
+  // `projection` is a `.lean()` Mongo row on every production call site, so `positions`
+  // arrives as a BSON `Binary` whose numeric indexing is `undefined` — see
+  // pack.js's `unpackPositions`. Reading it directly produced a beacon of
+  // `[NaN, NaN, NaN]`, serialized to the browser as `[null, null, null]`, on every
+  // single query. Tests pass a Float32Array straight through, which unpackPositions
+  // returns untouched.
+  const positions = unpackPositions(projection.positions);
+  if (!positions || positions.length < projection.pointIds.length * 3) {
+    // A row whose coordinate buffer is shorter than its own point-id list is corrupt —
+    // refuse rather than place the beacon against whatever bytes happen to be there.
+    return { placed: false, reason: 'corrupt_projection', hits: [] };
+  }
+
   const index = new Map(projection.pointIds.map((id, i) => [id, i]));
 
   const usable = hits.filter((h) => index.has(h.pointId));
@@ -56,9 +71,9 @@ export async function projectQuery(tenant, queryVector, projection, { nearestDen
   usable.forEach((h, i) => {
     const j = index.get(h.pointId) * 3;
     const w = exps[i] / total;
-    beacon[0] += projection.positions[j]     * w;
-    beacon[1] += projection.positions[j + 1] * w;
-    beacon[2] += projection.positions[j + 2] * w;
+    beacon[0] += positions[j]     * w;
+    beacon[1] += positions[j + 1] * w;
+    beacon[2] += positions[j + 2] * w;
   });
 
   return {

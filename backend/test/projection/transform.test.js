@@ -4,6 +4,7 @@
 // `nearestDense` injection point. Covers task 7.13: centroid placement inside the
 // convex hull of the top neighbors, and the stale-projection (no usable neighbor) case.
 import assert from 'assert';
+import { Binary } from 'bson';
 import { projectQuery } from '../../src/projection/transform.js';
 
 // A tiny fixture projection: 4 points at known 3D coordinates.
@@ -78,6 +79,55 @@ const tenant = { userId: 'u1', contextId: 'c1' };
   assert.strictEqual(result.placed, false, 'no usable neighbor must refuse to place a beacon');
   assert.strictEqual(result.reason, 'stale_projection', 'the refusal reason must be stale_projection');
   console.log('[transform.test] PASS — every neighbor outside the projection returns placed:false, reason:\'stale_projection\'');
+}
+
+// ── Stored-buffer shapes: the coordinate source is not always a Float32Array ─────────
+// This is the regression the tests above did not catch. Every assertion so far hands
+// `projectQuery` a Float32Array, which is what `packProjection` produced — but no
+// production call site ever does. routes/vectors.js reads the row with mongoose
+// `.lean()`, and a `Buffer`-typed path comes back through that as a BSON `Binary`, which
+// has no numeric indexing at all: `positions[j]` is `undefined`, the weighted sum is
+// `NaN`, and `JSON.stringify` writes it to the browser as `[null, null, null]`. Nothing
+// throws anywhere along that path. So the beacon must be exercised against the shapes a
+// row is ACTUALLY read back as, not only the shape it was written from.
+{
+  const fixtureHits = [
+    { pointId: 'a', score: 0.95 },
+    { pointId: 'b', score: 0.80 },
+    { pointId: 'c', score: 0.75 },
+  ];
+  const nearestDense = async () => fixtureHits;
+  const reference = await projectQuery(tenant, [0, 0, 0], projection, { nearestDense });
+
+  const asBuffer = Buffer.from(positions.buffer, positions.byteOffset, positions.byteLength);
+  const shapes = {
+    'Node Buffer (a hydrated mongoose doc)': asBuffer,
+    'BSON Binary (a .lean() read — every production call site)': new Binary(asBuffer),
+  };
+
+  for (const [label, stored] of Object.entries(shapes)) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await projectQuery(tenant, [0, 0, 0], { pointIds, positions: stored }, { nearestDense });
+    assert.strictEqual(result.placed, true, `${label}: the beacon must place`);
+    for (const v of result.beacon) {
+      assert.ok(Number.isFinite(v), `${label}: every beacon coordinate must be a finite number, got ${JSON.stringify(result.beacon)}`);
+    }
+    assert.deepStrictEqual(
+      result.beacon.map((v) => v.toFixed(6)), reference.beacon.map((v) => v.toFixed(6)),
+      `${label}: must place the beacon at the same coordinate a Float32Array does`,
+    );
+  }
+  console.log('[transform.test] PASS — a projection stored as a Buffer or a BSON Binary places the beacon at the same finite coordinate as a Float32Array');
+}
+
+// ── A coordinate buffer shorter than the point-id list is refused, not guessed ───────
+{
+  const nearestDense = async () => [{ pointId: 'a', score: 0.95 }];
+  const truncated = { pointIds, positions: positions.slice(0, 6) };   // 2 points' worth for 4 ids
+  const result = await projectQuery(tenant, [0, 0, 0], truncated, { nearestDense });
+  assert.strictEqual(result.placed, false, 'a truncated coordinate buffer must refuse to place');
+  assert.strictEqual(result.reason, 'corrupt_projection', 'the refusal reason must be corrupt_projection');
+  console.log('[transform.test] PASS — a coordinate buffer shorter than its own point-id list refuses with reason:\'corrupt_projection\'');
 }
 
 console.log('[transform.test] PASS — all assertions');

@@ -70,3 +70,42 @@ export function packProjection(sample, embedding, { fileNameById }) {
     bounds: { min, max },
   };
 }
+
+// ── Unpacking ────────────────────────────────────────────────────────────────────────
+// The inverse of the `Buffer.from(...)` above, and the ONLY supported way to read
+// coordinates back out of a stored Projection row.
+//
+// A row read through mongoose `.lean()` does not hand back the Float32Array that went in,
+// and does not hand back a Node Buffer either — it hands back a BSON `Binary` (verified
+// live: `row.positions.constructor.name === 'Binary'`). `Binary` has no numeric indexing,
+// so `positions[i]` is `undefined`, arithmetic on it is `NaN`, and `JSON.stringify` turns
+// that into `null` — a beacon coordinate of `[null, null, null]` that fails silently all
+// the way to the browser rather than throwing anywhere a log would catch it. Every
+// consumer that wants numbers rather than bytes goes through here.
+function toBytes(stored) {
+  if (stored instanceof Uint8Array) return stored;              // Node Buffer included
+  if (stored?.buffer instanceof Uint8Array) return stored.buffer;   // BSON Binary
+  if (stored?.buffer instanceof ArrayBuffer) return new Uint8Array(stored.buffer);
+  if (stored instanceof ArrayBuffer) return new Uint8Array(stored);
+  return null;
+}
+
+export function unpackPositions(stored) {
+  if (stored == null) return null;
+  if (stored instanceof Float32Array) return stored;
+  const bytes = toBytes(stored);
+  if (!bytes) {
+    throw new TypeError(`unpackPositions: cannot read positions from a ${stored?.constructor?.name ?? typeof stored}`);
+  }
+  if (bytes.byteLength % 4 !== 0) {
+    throw new Error(`unpackPositions: ${bytes.byteLength} bytes is not a whole number of float32s`);
+  }
+  // Copy into a fresh, exactly-sized, offset-0 ArrayBuffer rather than viewing in place.
+  // Two reasons, both of which bite here: a Buffer's byteOffset into Node's shared
+  // allocation pool is not guaranteed to be 4-byte aligned (a misaligned Float32Array
+  // view throws on construction), and `Buffer.prototype.slice` is an alias for
+  // `subarray` — it returns a VIEW over the whole pooled buffer, not a copy, so
+  // `.slice().buffer` is the pool, not these bytes. `new Uint8Array(typedArray)` is the
+  // one form that always copies exactly this range.
+  return new Float32Array(new Uint8Array(bytes).buffer);
+}

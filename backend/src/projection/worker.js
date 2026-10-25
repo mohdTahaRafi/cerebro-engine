@@ -41,6 +41,30 @@ export const projectionQueue = new Queue('projection', { connection: queueConnec
 // The Projection row is flipped to 'fitting' here, synchronously, BEFORE the job is
 // even confirmed enqueued — a context whose fit is stale must read as 'rebuilding'
 // immediately (§4.4), not only once a worker slot picks the job up.
+export function fitJobId(contextId) {
+  return `projection-${contextId}`;
+}
+
+// The states in which a job for this context is genuinely still going to run. Anything
+// else — 'completed', 'failed', 'unknown', or no job at all — means nothing is in flight,
+// however recently something was.
+const PENDING_STATES = new Set(['waiting', 'waiting-children', 'active', 'delayed', 'prioritized', 'paused']);
+
+/** True when a fit for `contextId` is queued or running right now. Redis unreachable
+ *  answers `true` — the caller (routes/vectors.js's self-heal) uses this to decide
+ *  whether to enqueue, and assuming "already in flight" during an outage is the safe
+ *  direction: it waits, rather than stampeding the queue once Redis comes back. */
+export async function hasPendingFit(contextId) {
+  try {
+    const job = await projectionQueue.getJob(fitJobId(contextId));
+    if (!job) return false;
+    return PENDING_STATES.has(await job.getState());
+  } catch (err) {
+    console.error(`[projection] could not read queue state for context ${contextId}:`, err.message);
+    return true;
+  }
+}
+
 export async function enqueueProjectionRebuild(tenant) {
   try {
     await Projection.updateOne(
@@ -48,10 +72,29 @@ export async function enqueueProjectionRebuild(tenant) {
       { $set: { status: 'fitting' }, $setOnInsert: { userId: tenant.userId, contextId: tenant.contextId } },
       { upsert: true },
     );
+
+    // BullMQ's jobId dedup covers FINISHED jobs too, not only waiting/active ones, and
+    // `JOB_OPTS.removeOnComplete.age` keeps the previous fit's key in Redis for 24 hours.
+    // So a second `.add()` with the same jobId any time inside that window is a SILENT
+    // no-op that returns the old, already-completed job (verified live against this
+    // Redis: one worker run for two adds, and a `remove()` in between restores the
+    // second run). The Projection row has already been flipped to 'fitting' three lines
+    // up by then, so the dropped add is not merely a skipped rebuild — the row is
+    // stranded in 'fitting' forever, the console shows "Rebuilding…" indefinitely, and
+    // POST /api/vectors/query stays 409-blocked because it demands a 'fresh' row. Three
+    // rows in this deployment's own database were in exactly that state. Clearing a
+    // finished key before adding keeps the dedup that matters (§4.5's "ten uploads, one
+    // job", which is about concurrent waiting/active jobs) without the false one.
+    const existing = await projectionQueue.getJob(fitJobId(tenant.contextId));
+    if (existing) {
+      if (PENDING_STATES.has(await existing.getState())) return;   // genuinely in flight
+      await existing.remove();
+    }
+
     await projectionQueue.add(
       'projection:fit',
       { userId: tenant.userId, contextId: tenant.contextId },
-      { ...JOB_OPTS, jobId: `projection-${tenant.contextId}` },
+      { ...JOB_OPTS, jobId: fitJobId(tenant.contextId) },
     );
   } catch (err) {
     // A Redis outage here must not fail the ingest/delete request it was called from —

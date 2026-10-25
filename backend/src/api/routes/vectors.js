@@ -2,7 +2,6 @@
 // GET /api/vectors/node/:pointId, POST /api/vectors/:contextId/rebuild (phase 7 §4).
 // `requireAuth` runs at the app level (index.js).
 import express from 'express';
-import mongoose from 'mongoose';
 import { Projection } from '../../models/Projection.js';
 import { Context } from '../../models/Context.js';
 import * as embeddings from '../../providers/embeddings.js';
@@ -12,18 +11,20 @@ import { applyRelevanceGate } from '../../retrieval/search.js';
 import { MAX_QUERY_CHARS } from '../../retrieval/constants.js';
 import { normalize } from '../../ingestion/normalize.js';
 import { requireContext } from '../middleware/requireContext.js';
-import { enqueueProjectionRebuild } from '../../projection/worker.js';
+import { enqueueProjectionRebuild, hasPendingFit } from '../../projection/worker.js';
 import { projectQuery } from '../../projection/transform.js';
 
 const router = express.Router();
 
-function isValidId(id) {
-  return mongoose.Types.ObjectId.isValid(id);
-}
-
+// `pending` is the one thing the console cannot work out for itself. 'absent' covers two
+// states that look identical on the wire and need opposite client behavior: a context
+// whose first fit was just enqueued (poll — a cloud is seconds away) and a context whose
+// fit FAILED and will never complete on its own (stop polling; show the reason and the
+// Rebuild control). Rather than have the client guess from the reason string or burn a
+// fixed retry budget on every visit, the server states the fact it already knows.
 function toWireProjection(row, extra) {
   return {
-    staleness: extra.staleness, reason: extra.reason,
+    staleness: extra.staleness, reason: extra.reason, pending: extra.pending,
     nodeCount: row?.nodeCount ?? 0,
     positions: row?.positions ? row.positions.toString('base64') : '',
     docIndex: row?.docIndex ? row.docIndex.toString('base64') : '',
@@ -48,17 +49,36 @@ router.get('/api/vectors/:contextId/projection', requireContext, async (req, res
 
     if (!row) {
       await enqueueProjectionRebuild(req.tenant);
-      return res.json(toWireProjection(null, { staleness: 'absent', reason: 'No projection has been computed for this context.' }));
+      return res.json(toWireProjection(null, {
+        staleness: 'absent', pending: true,
+        reason: 'No projection has been computed for this context yet — fitting it now.',
+      }));
     }
     if (row.status === 'failed') {
-      return res.json(toWireProjection(row, { staleness: 'absent', reason: row.reason }));
+      return res.json(toWireProjection(row, { staleness: 'absent', pending: false, reason: row.reason }));
     }
     if (row.status === 'fitting') {
+      // 'fitting' is a claim about the QUEUE, and the row cannot verify it on its own:
+      // the flag is written by enqueueProjectionRebuild before the job is confirmed
+      // enqueued, so anything that loses the job afterwards (a dropped add, a flushed
+      // Redis, a worker killed mid-fit) strands the row here permanently — the console
+      // reports "Rebuilding…" forever and the beacon stays 409-blocked, with no action
+      // the user can take. Check the claim against the queue and re-enqueue when it is
+      // no longer true. `hasPendingFit` answers true while Redis is unreachable, so an
+      // outage waits rather than enqueueing a rebuild per page load.
+      if (!(await hasPendingFit(req.tenant.contextId))) {
+        await enqueueProjectionRebuild(req.tenant);
+      }
       const context = await Context.findById(req.tenant.contextId).select('chunkCount').lean();
       const delta = Math.max(0, (context?.chunkCount ?? 0) - row.fittedChunkCount);
+      // delta === 0 is the explicit Rebuild action on an unchanged corpus, which the
+      // count-based wording renders as "0 new chunks aren't plotted yet" — a sentence
+      // that describes nothing and reads like a bug.
       return res.json(toWireProjection(row, {
-        staleness: 'rebuilding',
-        reason: `Rebuilding — ${delta} new chunk${delta === 1 ? '' : 's'} aren't plotted yet.`,
+        staleness: 'rebuilding', pending: true,
+        reason: delta === 0
+          ? 'Refitting this projection — the cloud below is the previous fit.'
+          : `Rebuilding — ${delta} new chunk${delta === 1 ? '' : 's'} aren't plotted yet.`,
       }));
     }
 
@@ -74,7 +94,7 @@ router.get('/api/vectors/:contextId/projection', requireContext, async (req, res
       const reason = delta > 0
         ? `${delta} chunk${delta === 1 ? '' : 's'} were added since this was fitted.`
         : `${-delta} chunk${-delta === 1 ? '' : 's'} were removed since this was fitted.`;
-      return res.json(toWireProjection(row, { staleness: 'rebuilding', reason }));
+      return res.json(toWireProjection(row, { staleness: 'rebuilding', pending: true, reason }));
     }
 
     // Downsampled at fit time: nodeCount (the plotted sample) is smaller than
@@ -82,7 +102,7 @@ router.get('/api/vectors/:contextId/projection', requireContext, async (req, res
     const reason = row.nodeCount < row.fittedChunkCount
       ? `Showing ${row.nodeCount.toLocaleString()} of ${row.fittedChunkCount.toLocaleString()} chunks.`
       : null;
-    res.json(toWireProjection(row, { staleness: 'fresh', reason }));
+    res.json(toWireProjection(row, { staleness: 'fresh', pending: false, reason }));
   } catch (err) { next(err); }
 });
 
@@ -117,7 +137,14 @@ router.post('/api/vectors/query', requireContext, async (req, res, next) => {
     const { vector } = await embeddings.encodeQuery(normalize(query));
     const result = await projectQuery(req.tenant, vector, row);
     if (!result.placed) {
-      return res.status(422).json({ error: 'None of this query\'s nearest neighbors are in the current projection.', reason: result.reason });
+      // Two distinct reasons reach here and they are not the same problem: a projection
+      // whose coordinate buffer no longer matches its own point-id list is broken and a
+      // rebuild fixes it, while a stale projection just does not cover these particular
+      // neighbors yet. Saying the wrong one sends the user looking in the wrong place.
+      const error = result.reason === 'corrupt_projection'
+        ? 'This projection is corrupt and needs rebuilding.'
+        : 'None of this query\'s nearest neighbors are in the current projection.';
+      return res.status(422).json({ error, reason: result.reason });
     }
 
     // §4.3's own closing line: rerank the beacon's real neighbors with the SAME rerank
@@ -141,7 +168,23 @@ router.post('/api/vectors/query', requireContext, async (req, res, next) => {
         finalRank: finalRankByPointId.get(n.pointId) ?? null,
       })),
     });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // Same mapping search.js applies to its own critical-path provider: an unreachable
+    // or rate-limited embedding service is a 503 with something the user can act on, not
+    // an opaque 500. Verified live — with this deployment's Cohere key over its monthly
+    // trial quota, the beacon previously surfaced as "Request failed (500)." with no
+    // indication that retrying later would help.
+    if (err.code === 'EOPENBREAKER') {
+      return res.status(503).json({ code: 'provider_unavailable', error: 'The embedding service is unavailable — the beacon cannot be placed right now.' });
+    }
+    if (err.code === 'ETIMEDOUT') {
+      return res.status(503).json({ code: 'provider_timeout', error: 'The embedding service timed out. Try again in a moment.' });
+    }
+    if (err.statusCode === 429 || err.status === 429) {
+      return res.status(503).json({ code: 'provider_rate_limited', error: 'The embedding service is rate-limited right now. Try again in a few minutes.' });
+    }
+    next(err);
+  }
 });
 
 // ── GET /api/vectors/node/:pointId ──────────────────────────────────────────────────

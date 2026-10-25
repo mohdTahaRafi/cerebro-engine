@@ -5,6 +5,14 @@
 // protocol-relative URL, not a same-origin path).
 const FALLBACK = '/chat';
 
+// The /login URL a signed-out visitor to `path` is sent to. `/` (which index-redirects to
+// /chat) and /chat itself are where a sign-in lands anyway, so they carry no returnTo —
+// `/login?returnTo=%2F` says nothing the bare `/login` doesn't. Deep links keep it.
+export function loginPathFor(path: string): string {
+  if (path === '/' || path === FALLBACK) return '/login';
+  return `/login?returnTo=${encodeReturnTo(path)}`;
+}
+
 export function encodeReturnTo(path: string): string {
   return encodeURIComponent(path);
 }

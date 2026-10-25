@@ -5,7 +5,7 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from '../context/AuthContext';
 import { BackendUnreachable } from '../components/design/BackendUnreachable';
 import { RouteLoading } from '../components/design/RouteLoading';
-import { encodeReturnTo } from '../lib/returnTo';
+import { loginPathFor } from '../lib/returnTo';
 
 export function RequireAuth() {
   const { status, refresh } = useAuth();
@@ -14,8 +14,7 @@ export function RequireAuth() {
   if (status === 'loading') return <RouteLoading />;
   if (status === 'unreachable') return <BackendUnreachable onRetry={refresh} />;
   if (status === 'anonymous') {
-    const returnTo = encodeReturnTo(`${location.pathname}${location.search}`);
-    return <Navigate to={`/login?returnTo=${returnTo}`} replace />;
+    return <Navigate to={loginPathFor(`${location.pathname}${location.search}`)} replace />;
   }
   return <Outlet />;
 }

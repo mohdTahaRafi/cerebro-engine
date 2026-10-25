@@ -74,9 +74,8 @@ tenancy/auth/observability platform layered on top of it.
 - `backend/src/models/` — Mongoose schemas: `User` (+ embedded OAuth `identities`),
   `Context`, `Document`, `Conversation`, `Message`, `Trace`, `Projection`, `UsageEvent`,
   `PipelineError`.
-- `frontend/src/styles/` — global styling. `docs/` and `skywalker/` contain planning/
-  reference material and may not match runtime behavior; `skywalker/` in particular is an
-  unrelated reference example of the planning methodology, not part of this app.
+- `frontend/src/styles/` — global styling. `docs/` contains planning/reference material
+  and may not match runtime behavior.
 - `vision/app/` — the Python (FastAPI) vision service: PDF page classification
   (text vs. scanned), rendering, OCR, and ColPali embedding.
 

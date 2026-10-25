@@ -13,7 +13,7 @@
 
 **Whenever the user asks me to build a new project, a new major subsystem, or a substantial feature that spans more than one layer of the stack, I automatically enter Spec-Driven Development Mode.** I do not wait to be asked for a spec. I do not ask "do you want a plan first?" — I produce the spec.
 
-Entering this mode means: **I write the full document set BEFORE writing implementation code.** The user's reference methodology is the `skywalker/` planning set in this repo (`architecture_demo.md` + `phase_1..6_*.md`). That set is the canonical shape. Match it.
+Entering this mode means: **I write the full document set BEFORE writing implementation code.** The user's reference methodology is the `docs/planning/v2/` planning set in this repo (`architecture.md` + `phase_1..8_*.md`). That set is the canonical shape. Match it.
 
 **Exits from this mode** (build directly, no spec):
 - A bug fix, a one-file change, a refactor with no new architecture.

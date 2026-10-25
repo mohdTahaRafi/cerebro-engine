@@ -1,16 +1,10 @@
-// phase_2 §3.1, §3.1b — the whole card/row is a link to /contexts/:id; the ⋯ menu stops
-// propagation. `deleting` renders greyed and unclickable with a chip, never silently
+// phase_2 §3.1, §3.1b — the whole card/row is a link to /contexts/:id. The ⋯ menu
+// (Rename / Edit description / Delete) was removed: all three live on the context's own
+// page, in ContextMetaPanel, one click away. `deleting` renders greyed and unclickable with a chip, never silently
 // absent (would look like data loss) and never still clickable (would 404 mid-delete).
-import { useState } from 'react';
 import { Link } from 'react-router';
-import { Folder, MoreHorizontal } from 'lucide-react';
-import { Button } from '../ui/button';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
-import { ContextFormDialog } from './ContextFormDialog';
-import { DeleteContextDialog } from './DeleteContextDialog';
-import type { KnowledgeContext, CreateContextRequest } from '../../../api/contracts';
+import { Folder } from 'lucide-react';
+import type { KnowledgeContext } from '../../../api/contracts';
 
 // §3.1b — six pale, low-saturation hues so a row of cards reads as a quiet set (DESIGN.md's
 // restraint rule), each with a dark-mode pair that composites the same way theme.css's own
@@ -44,38 +38,12 @@ function formatRelativeTime(iso: string): string {
 interface ContextCardProps {
   context: KnowledgeContext;
   view: 'grid' | 'list';
-  onUpdate: (id: string, body: CreateContextRequest) => Promise<KnowledgeContext>;
-  onDelete: (id: string) => Promise<void>;
 }
 
-export function ContextCard({ context, view, onUpdate, onDelete }: ContextCardProps) {
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [descriptionOpen, setDescriptionOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+export function ContextCard({ context, view }: ContextCardProps) {
   const isDeleting = context.status === 'deleting';
   const tint = tintFor(context.id);
   const updated = context.documentCount === 0 ? 'Never used' : `Updated ${formatRelativeTime(context.updatedAt)}`;
-
-  const menu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline" size="icon"
-          onClick={(e) => e.stopPropagation()}
-          aria-label={`Actions for ${context.title}`}
-          disabled={isDeleting}
-        >
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuItem onSelect={() => setRenameOpen(true)}>Rename</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => setDescriptionOpen(true)}>Edit description</DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>Delete</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 
   const icon = (
     <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tint.bg} ${tint.text}`}>
@@ -85,12 +53,9 @@ export function ContextCard({ context, view, onUpdate, onDelete }: ContextCardPr
 
   const content = view === 'grid' ? (
     <div className={`flex h-full flex-col gap-3 rounded-lg border border-line bg-surface-raised p-5 shadow-1 transition-colors ${isDeleting ? 'opacity-50' : 'hover:border-line-strong'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-3">
-          {icon}
-          <h3 className="font-semibold text-ink">{context.title}</h3>
-        </div>
-        {menu}
+      <div className="flex items-center gap-3">
+        {icon}
+        <h3 className="font-semibold text-ink">{context.title}</h3>
       </div>
       {isDeleting && (
         <span className="inline-flex w-fit items-center gap-1 rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-graphite">
@@ -115,28 +80,14 @@ export function ContextCard({ context, view, onUpdate, onDelete }: ContextCardPr
       </div>
       <span className="w-28 shrink-0 text-sm tabular-nums text-ink-secondary">{context.documentCount} documents</span>
       <span className="w-32 shrink-0 text-sm text-graphite">{updated}</span>
-      {menu}
     </div>
   );
 
-  return (
-    <>
-      {isDeleting ? (
-        <div aria-disabled="true">{content}</div>
-      ) : (
-        <Link to={`/contexts/${context.id}`} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-signal">
-          {content}
-        </Link>
-      )}
-      <ContextFormDialog
-        mode="edit" context={context} open={renameOpen} onOpenChange={setRenameOpen}
-        onSubmit={(body) => onUpdate(context.id, body)} focusField="name"
-      />
-      <ContextFormDialog
-        mode="edit" context={context} open={descriptionOpen} onOpenChange={setDescriptionOpen}
-        onSubmit={(body) => onUpdate(context.id, body)} focusField="description"
-      />
-      <DeleteContextDialog context={context} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={onDelete} />
-    </>
+  return isDeleting ? (
+    <div aria-disabled="true">{content}</div>
+  ) : (
+    <Link to={`/contexts/${context.id}`} className="block rounded-lg focus-visible:outline-2 focus-visible:outline-signal">
+      {content}
+    </Link>
   );
 }

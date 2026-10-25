@@ -21,7 +21,7 @@ const VIEW_STORAGE_KEY = 'cerebro.contexts.view';
 
 export function ContextList() {
   const navigate = useNavigate();
-  const { contexts, status, create, update, remove } = useContexts();
+  const { contexts, status, create } = useContexts();
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('updated');
@@ -94,7 +94,9 @@ export function ContextList() {
             </div>
             <div className="ml-auto flex items-center gap-2">
               <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-                <SelectTrigger className="w-[180px]" aria-label="Sort contexts">
+                {/* 236px fits the longest option, "Sort by: Document count", untruncated —
+                    180px clipped even "Sort by: Last updated" to "Last update". */}
+                <SelectTrigger className="w-[236px]" aria-label="Sort contexts">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -140,13 +142,13 @@ export function ContextList() {
         ) : view === 'grid' ? (
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(288px, 1fr))' }}>
             {sorted.map((c) => (
-              <ContextCard key={c.id} context={c} view="grid" onUpdate={update} onDelete={remove} />
+              <ContextCard key={c.id} context={c} view="grid" />
             ))}
           </div>
         ) : (
           <div className="rounded-lg border border-line bg-surface-raised">
             {sorted.map((c) => (
-              <ContextCard key={c.id} context={c} view="list" onUpdate={update} onDelete={remove} />
+              <ContextCard key={c.id} context={c} view="list" />
             ))}
           </div>
         )}

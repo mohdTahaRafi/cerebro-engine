@@ -1,17 +1,15 @@
-// phase_2 §4 — header (title + inline rename, Upload documents, New context, ⋯ → Delete),
-// the whole-page dropzone (§4.2), the document table (§7), and the 380px evidence margin
+// phase_2 §4 — header (title + inline rename), the whole-page dropzone (§4.2), the document table (§7), and the 380px evidence margin
 // (§4.1) holding context identity + the upload target. Below 1024px the margin renders as
 // a stacked panel above the table instead of a fixed-width column (task 2.8).
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+//
+// The header's Upload documents / New context / ⋯ → Delete buttons were removed: upload
+// duplicated the evidence margin's own dropzone (click-to-browse included), New context
+// belongs on /contexts, and Delete moved into ContextMetaPanel's footer.
+import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
-import { toast } from 'sonner';
-import { Folder, MoreHorizontal, Pencil, Plus, Upload } from 'lucide-react';
+import { Folder, Pencil } from 'lucide-react';
 import { Button } from '../../components/ui/button';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
 import { ContextFormDialog } from '../../components/contexts/ContextFormDialog';
-import { DeleteContextDialog } from '../../components/contexts/DeleteContextDialog';
 import { ContextMetaPanel } from '../../components/contexts/ContextMetaPanel';
 import { tintFor } from '../../components/contexts/ContextCard';
 import { UploadDropzone } from '../../components/documents/UploadDropzone';
@@ -30,9 +28,6 @@ export function ContextDetail() {
   const [context, setContext] = useState<KnowledgeContext | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [renameOpen, setRenameOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { documents, refresh } = useDocuments(contextId);
   // Bug #1: this page manages its own `context` state and calls api.contexts.* directly,
@@ -82,11 +77,6 @@ export function ContextDetail() {
     navigate('/contexts');
   }
 
-  function onPick(e: ChangeEvent<HTMLInputElement>) {
-    if (e.target.files) enqueue(Array.from(e.target.files));
-    e.target.value = '';
-  }
-
   if (!id) return <Navigate to="/contexts" replace />;
 
   if (loadError) {
@@ -110,7 +100,7 @@ export function ContextDetail() {
         {(target) => (
           <div className="flex h-full flex-col gap-6 overflow-y-auto p-8 lg:flex-row lg:overflow-hidden">
             <aside className="order-1 flex w-full shrink-0 flex-col gap-4 lg:order-2 lg:w-[380px] lg:overflow-y-auto">
-              <ContextMetaPanel context={context} onUpdate={handleUpdate} />
+              <ContextMetaPanel context={context} onUpdate={handleUpdate} onDelete={handleDelete} />
               <div className="rounded-lg border border-line bg-surface-raised p-4 shadow-1">
                 <h2 className="mb-3 font-semibold text-ink">Upload documents</h2>
                 {target}
@@ -133,25 +123,6 @@ export function ContextDetail() {
                     <p className="text-sm text-graphite">{context.description || '—'}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
-                    <Upload className="size-4" /> Upload documents
-                  </Button>
-                  <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onPick} />
-                  <Button onClick={() => setCreateOpen(true)}>
-                    <Plus className="size-4" /> New context
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon" aria-label="More context actions">
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>Delete</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
               </div>
 
               <DocumentTable
@@ -169,12 +140,6 @@ export function ContextDetail() {
         mode="edit" context={context} open={renameOpen} onOpenChange={setRenameOpen}
         onSubmit={(body) => handleUpdate(context.id, body)} focusField="name"
       />
-      <ContextFormDialog
-        mode="create" open={createOpen} onOpenChange={setCreateOpen}
-        onSubmit={(body) => api.contexts.create(body)}
-        onSuccess={(created) => { refreshScope(); toast.success('Context created.'); navigate(`/contexts/${created.id}`); }}
-      />
-      <DeleteContextDialog context={context} open={deleteOpen} onOpenChange={setDeleteOpen} onDelete={handleDelete} />
     </>
   );
 }

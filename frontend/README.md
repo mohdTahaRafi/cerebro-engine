@@ -1,157 +1,90 @@
-# 🧠 Cerebro Engine: Frontend Architecture
+# Cerebro — Frontend
 
-<div align="center">
-  <img src="https://img.shields.io/badge/React-19.0-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind" />
-  <img src="https://img.shields.io/badge/Framer_Motion-12.0-0055FF?style=for-the-badge&logo=framer&logoColor=white" alt="Framer Motion" />
-</div>
+The React client for Cerebro: sign-in, per-user document contexts, a streaming chat with
+cited answers, and the inspector consoles (execution traces, the 3D vector space, system
+health). Built in v2 phases 1–4 and 8 — see [`../docs/planning/v2/`](../docs/planning/v2/).
+The visual system (tokens, type, motion, component rules) is specified in
+[`../DESIGN.md`](../DESIGN.md).
 
-<br />
+## Stack
 
-> **Rewritten phase 6 (§9, task 6.22).** The previous version of this document described
-> Redis cache hit rates and RRF scores read directly off the C++ bridge — neither exists.
-> Retrieval telemetry comes from the real pipeline (`backend/src/telemetry/
-> pipelineTelemetry.js`) over `/api/search` and `/api/ask`'s SSE `telemetry` event; the C++
-> addon has not been on the query path since Phase 3.
+| Choice | Used for |
+|---|---|
+| React 18.3 + React Router 7 | UI and routing (`createBrowserRouter`, lazy routes) |
+| Vite 6 | Dev server (proxies `/api` to the backend on :5000) and production build |
+| Tailwind CSS 4 | Styling over the CSS-variable tokens in `src/styles/theme.css`; light/dark via `next-themes` |
+| Radix UI (shadcn/ui wrappers in `components/ui/`) | Accessible dialogs, menus, selects, tooltips, tabs |
+| react-markdown + remark-gfm/math, rehype-katex/highlight | Rendering streamed answers |
+| three + @react-three/fiber/drei | The `/admin/vectors` point cloud (lazy-loaded chunk) |
+| motion, lucide-react, sonner | Animation, icons, toasts |
 
-This is the client for **Cerebro**, a document RAG (Retrieval-Augmented Generation) system:
-hybrid dense+sparse retrieval fused server-side by Qdrant, a second retrieval path for
-scanned pages via ColPali, and a LangGraph-driven conversational pipeline that streams
-grounded, cited answers over Server-Sent Events.
+## Routes
 
----
+| Path | Access | Screen |
+|---|---|---|
+| `/login`, `/signup`, `/forgot-password`, `/reset-password` | public | Local password and Google/GitHub OAuth (buttons shown per `GET /api/auth/capabilities`) |
+| `/chat` (`/` redirects here) | signed in | Threads sidebar, context switcher, streaming answers with citations and the provenance ribbon |
+| `/contexts`, `/contexts/:id` | signed in | Context list; per-context documents, uploads and ingest progress |
+| `/admin/traces`, `/admin/traces/:id` | signed in | Your own execution traces: stage waterfall, rerank matrix, exact prompt payload |
+| `/admin/vectors` | signed in | UMAP projection of a context's chunks with the query beacon |
+| `/admin/health` | admin (`ADMIN_EMAILS`) | Dependencies, breakers, queue, collections, pipeline errors |
 
-## 🎯 Dual-Tier UI Architecture
+`/advanced` and `/vector` (v1 paths) redirect to their v2 equivalents. Signed-out visits to
+a guarded route go to `/login`, carrying `returnTo` for deep links (`lib/returnTo.ts`).
 
-Two different audiences, two different views onto the **same** live conversation state
-(`EngineContext`, mounted once in `RootLayout` and shared across both routes).
+## Layout
 
-### 1. The Consumer Dashboard (`/`)
-*The everyday chat experience.*
-- **Centralized input** — an expansive, auto-resizing text area (`react-textarea-autosize`).
-- **Streaming answers** — tokens arrive over SSE and append to React state as they land;
-  `AnswerBox` renders the growing markdown incrementally.
-- **Source chips** — retrieved chunks/pages condense into clickable citations
-  (`SourceChip.tsx`, Radix UI `HoverCard`) rather than raw JSON.
-- **Ambient ingestion** — dropping a file anywhere (`GlobalDropzone.tsx`) or attaching it in
-  the chat input enqueues it through `POST /api/documents` and polls
-  `GET /api/documents/:id/status` until it's ready; the toast tracks real progress, not a
-  simulated timeout sequence.
-
-### 2. The Advanced Console (`/advanced`)
-*A live per-query trace of the same pipeline `/` uses — not a separate search tool.*
-- **Execution Plan** (`ExecutionPlan.tsx`) — a real-time waterfall of
-  `PipelineTelemetry` (`TelemetryTypes.ts`): condense, embed/sparse/colpali (drawn under a
-  shared brace — they run concurrently, not sequentially), chunk/page retrieve, merge,
-  rerank, generate, with a first-token marker. A skipped stage (first-turn condense, no
-  visual corpus) renders as a hatched bar labeled *skipped*, never a misleading `0ms`.
-- **Source Provenance Panel** (`ProvenancePanel.tsx`) — which branch (`dense` / `sparse` /
-  `both` / `colpali`) produced each result, and how far reranking moved it (fusion rank →
-  final rank) — the reranker's contribution rendered as movement, not just asserted.
-- **LangSmith deep link** — every query's `runId` links straight into the full trace.
-
----
-
-## 🛠️ Tech Stack
-
-| Technology | Purpose |
-| :--- | :--- |
-| **React 19** | Concurrent rendering for non-blocking UI during heavy SSE streaming. |
-| **Vite 6** | Fast dev server and production bundling. |
-| **Tailwind CSS v4** | Utility classes, customized via CSS variables for the console's dark/neon theme. |
-| **Framer Motion** | Layout and micro-interaction animation. |
-| **Radix UI** | Unstyled, accessible primitives (Dialogs, Tooltips, HoverCards, ScrollAreas). |
-| **Lucide React** | Iconography. |
-| **Recharts** | Charting where it's still real data (see Known Placeholders below). |
-| **react-markdown** + **remark-gfm** | Streamed answer rendering. |
-
----
-
-## 📡 The Network Layer: Custom Data Hooks
-
-Cerebro avoids a global state library in favor of a small number of purpose-built hooks,
-composed together in `EngineContext`.
-
-### `useCerebroChat.ts` (the SSE engine)
-The one live pipeline both routes read from.
-1. `POST /api/ask` with `{ query, threadId?, scopeDocumentIds? }`.
-2. Reads the response body as a stream, decodes UTF-8 incrementally, and splits on `\n\n`
-   frame boundaries.
-3. Switches on each frame's `event` field (`threadId` / `sources` / `token` / `telemetry` /
-   `error`) rather than sniffing which fields are present — every frame's shape is explicit.
-4. `telemetry` carries the full `PipelineTelemetry` object, the LangSmith `runId`, and org/
-   project info for the deep link — read by both `ConsumerDashboard` and `CoreEngine`.
-5. An `AbortController`, wired through `stopGenerating()`/superseding queries, cancels the
-   fetch — the backend's own `res.on('close')` handler (not `req.on('close')` — see
-   `backend/src/api/routes/ask.js`'s comment for why that distinction is load-bearing)
-   aborts the LangGraph run so a stopped question doesn't keep burning generation tokens.
-
-### `useThreads.ts` (conversation history)
-Plain `GET`/`PATCH`/`DELETE` against `/api/threads` — no separate caching layer; the
-sidebar list is small enough to refetch on the actions that change it.
-
-### `EngineContext`'s `ingestFile`
-`POST /api/documents`, then polls `GET /api/documents/:id/status` until `ready` or `failed`
-— the returned promise resolves once the document is actually searchable, not merely
-accepted, so a question asked right after an attachment can be scoped to it
-(`scopeDocumentIds`) without a race.
-
----
-
-## 🎨 Styling
-
-### The Palette
-The developer console keeps a deliberately dense, dark terminal aesthetic:
-- **Backgrounds**: `#020617` (deep obsidian), `#0A0A0A` (true black).
-- **Accent**: `#00FF41` (terminal green) for active/successful data; branch-specific
-  colors (blue/orange/purple) distinguish dense/sparse/ColPali provenance at a glance.
-- **Typography**: `font-mono`, `tracking-widest` — mechanical, not decorative.
-
-### Custom Scrollbars
-```css
-.custom-scrollbar::-webkit-scrollbar { width: 8px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: #000; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #333; }
+```
+src/
+├── api/
+│   ├── client.ts           # request() + SSE streamEvents(); attaches X-CSRF-Token from the cerebro.csrf cookie
+│   ├── contracts.ts        # wire types shared by every endpoint module
+│   ├── endpoints/          # one module per backend router (auth, contexts, documents, chat, threads, traces, vectors, admin, health)
+│   └── index.ts            # `api` — the only import components use
+├── app/
+│   ├── routes.tsx          # the route table above
+│   ├── guards/             # RequireAuth, RequireAdmin
+│   ├── context/            # AuthContext, ContextScopeContext (active context), EngineContext (live chat state)
+│   ├── hooks/              # data hooks: useCerebroChat (SSE), useContexts, useDocuments, useTraces, useProjection, ...
+│   ├── pages/              # one component per route, grouped auth/ contexts/ admin/
+│   ├── components/
+│   │   ├── core/           # app shell: Sidebar, TopHeader, UserMenu, TelemetryTypes (mirrors backend PipelineTelemetry)
+│   │   ├── chat/           # Composer, Transcript, Turn, citations, ProvenanceRibbon
+│   │   ├── contexts/  documents/   # context cards/dialogs; document table, upload queue, stage chips
+│   │   ├── trace/  vectors/  health/   # the three inspector consoles
+│   │   ├── auth/  design/  # auth screens' shell; shared primitives (EmptyState, Unavailable, OtpInput, ...)
+│   │   └── ui/             # shadcn/ui wrappers over Radix — only the ones in use
+│   └── lib/                # small pure helpers
+└── styles/                 # theme.css (tokens), tailwind.css, fonts.css
 ```
 
----
+### Streaming chat
 
-## ⚠️ Known Placeholders
+`useCerebroChat` posts to `/api/ask` and reads the SSE body frame by frame (`data: …\n\n`,
+terminated by `[DONE]`). Each frame carries an explicit `event` — `threadId`, `sources`,
+`token`, `telemetry`, `error` — and the `telemetry` frame is the same `PipelineTelemetry`
+object `/api/search` returns, typed in `components/core/TelemetryTypes.ts`. Keep both sides
+of that contract in sync with `backend/src/telemetry/pipelineTelemetry.js`. Stopping a
+generation aborts the fetch, and the backend cancels the LangGraph run.
 
-Not every panel in `/advanced` is wired to real data yet — `HardwareStats.tsx`'s Redis
-cache-hit-rate and C++ exec-time charts are illustrative mock series (`recharts` fed static
-arrays), inherited from the console's original design and out of this phase's explicit
-scope (`docs/planning/phase_6_polish_production.md` §12 lists `ExecutionPlan.tsx`,
-`ProvenancePanel.tsx`, `TelemetryTypes.ts`, and `CoreEngine.tsx` as the console files this
-phase rewrites — `HardwareStats.tsx` isn't one of them). Treat that one panel as decorative
-until it's wired to `/health`'s real queue/collection counts or `/metrics`.
+## Scripts
 
----
-
-## 🚀 Setup & Developer Workflow
-
-### Prerequisites
-- Node.js 22+
-- Backend running on `localhost:5000` (`cd ../backend && npm run dev`), which itself needs
-  the Docker stack up (`docker compose up -d` from the repo root) — see `../AGENTS.md`.
-
-### Installation
 ```bash
 npm install
+npm run dev         # http://localhost:5173 — needs the backend on :5000 (see ../AGENTS.md)
+npm run build       # → dist/, served by Caddy in production (../docker-compose.prod.yml)
+npm run typecheck   # tsc --noEmit
+npm test            # every test:* script below
 ```
 
-### Development
-```bash
-npm run dev
-```
-Vite proxies `/api/*` to `localhost:5000`, so the dev server needs no CORS configuration.
+The tests are standalone Node scripts (no framework; `.ts` files run on Node 22's built-in
+type stripping):
 
-### Production Build
-```bash
-npm run build
-```
-Output goes to `dist/` — in production this is bind-mounted into the Caddy container
-(`../docker-compose.prod.yml`, `../Caddyfile`), not served by Vite or a Node process of its
-own. There is currently no `npm run preview` script; use `docker compose -f
-../docker-compose.prod.yml up` to verify the built bundle end-to-end.
+| Script | Checks |
+|---|---|
+| `test:render-inspector` | Server-renders the real Waterfall and RerankMatrix against fixture telemetry |
+| `test:contrast`, `test:stage-colors` | Token contrast ratios; the eight stage colors stay distinguishable in both themes |
+| `test:stream-safe-markdown` | Partial-markdown handling while an answer is still streaming |
+| `test:refusals` | The refusal strings match the backend's |
+| `test:waterfall` | Unaccounted-time math with parallel stages |
+| `test:decode-projection` | Binary projection payload decoding and color resolution |

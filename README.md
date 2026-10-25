@@ -100,32 +100,38 @@ built.
 
 ```
 cerebro/
-├── backend/
+├── backend/                  # Node.js API server (Express 5)
 │   ├── src/
-│   │   ├── api/            # Express app, routes, rate-limit/CORS/helmet middleware
-│   │   ├── ingestion/      # parse → normalize → chunk → embed → upsert (BullMQ job)
-│   │   ├── providers/      # one adapter per external dependency (Cohere, Qdrant,
-│   │   │                   # LlamaParse, vision service, LLM, storage, breaker)
-│   │   ├── retrieval/      # hybrid search pipeline, provenance dedup, stage timing
-│   │   ├── graph/          # LangGraph conversational RAG state machine
-│   │   ├── telemetry/      # tracing, usage accounting, PipelineTelemetry, Prometheus
-│   │   └── cpp/            # C++ AVX2/FMA addon — benchmark artifact, not serving path
-│   ├── bench/               # bench/cppVsQdrant.js — the C++-vs-Qdrant benchmark
-│   ├── scripts/             # setup-qdrant, check-providers, migrate-legacy
-│   └── Dockerfile           # multi-stage: node-gyp build → slim runtime
+│   │   ├── api/              # Express app, routers, middleware (auth, CSRF, quotas, rate limits, errors)
+│   │   ├── auth/             # sessions, Passport strategies, argon2id passwords, OTP, account linking
+│   │   ├── contexts/         # context-delete cascade (own BullMQ queue) and counter maintenance
+│   │   ├── ingestion/        # parse → normalize → chunk → embed → upsert (BullMQ job), upload guards
+│   │   ├── retrieval/        # hybrid search pipeline, provenance dedup, stage timing
+│   │   ├── graph/            # LangGraph conversational RAG state machine + prompts
+│   │   ├── projection/       # UMAP fit worker, binary packing, query beacon placement
+│   │   ├── providers/        # one adapter per dependency: Cohere, Qdrant, LlamaParse, vision, LLM, storage
+│   │   ├── telemetry/        # LangSmith tracing, usage accounting, PipelineTelemetry, Prometheus
+│   │   ├── models/           # Mongoose schemas (User, Context, Document, Conversation, Trace, ...)
+│   │   ├── notify/           # OTP email (nodemailer) and SMS (Twilio)
+│   │   └── cpp/              # C++ AVX2/FMA addon — benchmark artifact, not on the serving path
+│   ├── test/                 # standalone verification scripts per subsystem (see AGENTS.md)
+│   ├── bench/                # C++-vs-Qdrant benchmark and the v2 budget benchmarks
+│   ├── scripts/              # setup-qdrant, check-providers, migrate-legacy, migrate-to-tenancy
+│   └── Dockerfile            # multi-stage: node-gyp build → slim runtime
 │
-├── frontend/
-│   └── src/app/
-│       ├── pages/           # ConsumerDashboard ("/"), CoreEngine ("/advanced")
-│       ├── components/core/ # ExecutionPlan, ProvenancePanel, AnswerBox, ...
-│       ├── context/         # EngineContext — the one shared conversation state
-│       └── hooks/           # useCerebroChat (SSE), useThreads
+├── frontend/                 # React 18 + Vite client — see frontend/README.md
+│   └── src/
+│       ├── api/              # typed request/SSE client and one module per backend router
+│       └── app/              # routes, guards, pages, components, hooks, contexts
 │
-├── vision/                  # Python/FastAPI: classify, render, OCR, ColPali embed
+├── vision/                   # Python/FastAPI: page classify, render, OCR, ColPali embed
+├── docs/                     # specs, runbooks, bug register — see docs/README.md
+├── DESIGN.md                 # UI design system
+├── deploy.sh                 # one-command production deploy (preflight → build → up → smoke test)
 ├── docker-compose.yml        # dev stack: Qdrant, MongoDB, Redis, vision
 ├── docker-compose.prod.yml   # + backend, MinIO, Caddy, resource limits
-├── Caddyfile                 # TLS + SSE-safe reverse proxy
-└── docs/planning/             # architecture.md + phase_1..6_*.md
+├── docker-compose.prod.verify.yml, Caddyfile.verify   # `deploy.sh --local` overrides (tls internal)
+└── Caddyfile                 # TLS, static SPA, SSE-safe proxy for /api/* only (so /metrics stays internal)
 ```
 
 ---

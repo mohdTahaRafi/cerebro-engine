@@ -30,7 +30,8 @@ tenancy/auth/observability platform layered on top of it.
   `/api/vectors` (observability/projection consoles), `/api/admin` (operator-only).
 - `backend/src/api/middleware/` — `requireAuth`, `requireContext` (resolves + owns-checks
   a `:contextId`), `requireAdmin`, `csrf.js` (double-submit token), `quotas.js` (the four
-  per-tenant resource limits), `rateLimit.js`, `upload.js`.
+  per-tenant resource limits), `rateLimit.js`, `upload.js`, `errorHandler.js` (the
+  catch-all, registered last; never serializes `err.stack`).
 - `backend/src/auth/` — sessions (`session.js`, Redis-backed via connect-redis),
   Passport strategies (`strategies/local.js`, `google.js`, `github.js`), account linking
   (`linking.js`), password hashing (`password.js`, argon2id), OTP (`otp.js`), rate limits
@@ -166,8 +167,17 @@ server and run whichever test needs a live backend in a single shell invocation 
 expecting a previously-launched server to persist.
 
 These test/check scripts create temporary files and may insert/delete real MongoDB/Qdrant
-data. Run them only with permission and suitable local test data. The frontend has `npm run
-build`, but no configured unit-test, lint, or type-check script.
+data. Run them only with permission and suitable local test data.
+
+Run from `frontend/` — all offline, nothing needs to be running:
+
+```bash
+npm run typecheck              # tsc --noEmit
+npm test                       # every test:* script (render, contrast, markdown, waterfall, ...)
+npm run build                  # production bundle → dist/
+```
+
+There is no lint script on either side.
 
 ## Technical constraints
 

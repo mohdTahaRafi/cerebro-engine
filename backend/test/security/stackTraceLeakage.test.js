@@ -1,6 +1,6 @@
 // Phase 8 §3.4 — "every 4xx/5xx body across the API is asserted to contain no `at `
 // frame; stacks appear only in /api/admin/errors." Two parts: a static check that
-// middleware/errorHandler.js's catch-all branch never serializes `err.stack` into a
+// api/middleware/errorHandler.js's catch-all branch never serializes `err.stack` into a
 // response body (the actual control — see that file), and a live sweep of real
 // endpoints across the running backend, deliberately provoking a 4xx/5xx from each
 // major router, asserting none of the bodies contain a stack-trace line.
@@ -23,7 +23,7 @@ async function main() {
 
   await test('errorHandler.js\'s catch-all branch never sends err.stack', () => {
     const src = fs.readFileSync(
-      new URL('../../src/middleware/errorHandler.js', import.meta.url),
+      new URL('../../src/api/middleware/errorHandler.js', import.meta.url),
       'utf8',
     );
     // The only response bodies errorHandler.js ever sends are literal string messages

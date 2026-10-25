@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import mongoose from 'mongoose';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import { buildCorsOptions } from './corsOptions.js';
 
 import { config } from '../config/index.js';

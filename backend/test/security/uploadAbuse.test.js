@@ -14,7 +14,7 @@ import { User } from '../../src/models/User.js';
 import { Context } from '../../src/models/Context.js';
 import { Document } from '../../src/models/Document.js';
 import contextsRouter from '../../src/api/routes/contexts.js';
-import { errorHandler } from '../../src/middleware/errorHandler.js';
+import { errorHandler } from '../../src/api/middleware/errorHandler.js';
 import { buildZipBomb } from './lib/zipBomb.js';
 
 let failures = 0;

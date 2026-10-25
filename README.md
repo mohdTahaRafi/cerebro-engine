@@ -201,10 +201,9 @@ the app never sees (`docs/planning/v2/deployment.md` §1).
 ## Production Deployment
 
 ```bash
-cd frontend && npm run build && cd ..
 cp .env.example .env       # DOMAIN, provider keys, MinIO credentials, SESSION_SECRET, ...
-docker compose -f docker-compose.prod.yml up -d --wait
-npm --prefix backend run setup:qdrant
+./deploy.sh                # preflight → frontend build → compose up --wait → Qdrant index → smoke test
+./deploy.sh --local        # same stack on a dev box, Caddy `tls internal` instead of Let's Encrypt
 ```
 
 Brings up the full stack — Qdrant, MongoDB, Redis (now durable — sessions and password-reset

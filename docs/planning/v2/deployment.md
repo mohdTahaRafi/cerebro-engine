@@ -7,6 +7,49 @@
 > one person. Steps 1–9 below are phase_8 §4.4's own numbered list, each expanded to what an
 > operator actually types and what they should see.
 
+**Short version:** steps 2–5 are automated by [`deploy.sh`](../../../deploy.sh) at the repo
+root (task 8.20) — preflight checks, frontend build, `compose config`, `up --wait`, the Qdrant
+index, and a smoke test through Caddy, stopping by name at the first failure. Steps 1 and 6–9
+need a person in a browser; the script prints them, with the real domain filled in, when it
+finishes. `./deploy.sh --local` rehearses the identical stack on a dev box via
+`Caddyfile.verify`'s `tls internal`.
+
+---
+
+## 0. Host, DNS, firewall
+
+**Host.** One Linux VM with Docker Engine + the Compose v2 plugin. Sizing, measured on the
+rehearsal stack (2026-10-15, ColPali off): the seven containers idle at ~860 MB combined, and
+the images total ~2.7 GB. The load peaks are a UMAP projection fit (backend, 2 GB limit —
+measurements.md: ~31 s for 5k nodes) and Tesseract OCR on a scanned PDF (vision). So:
+**2 vCPU / 4 GB RAM / 30 GB disk minimum, 4 vCPU / 8 GB recommended.** The compose memory
+limits (≈16 GB summed) are ceilings, not reservations — they do not need to fit in RAM at
+once. ColPali (`COLPALI_ENABLED=true`) is the exception: it needs a GPU host and ~6 GB for the
+vision container alone (phase 4 §11).
+
+**DNS.** Before the first deploy, create A records for **both** `DOMAIN` and `www.DOMAIN`
+pointing at the host's public IP. `deploy.sh` refuses to start if either is missing or points
+elsewhere: Caddy would otherwise retry ACME against the wrong address, and Let's Encrypt
+allows 5 failed validations per hostname per hour — wrong DNS burns that budget and then
+blocks the deploy for an hour after DNS is fixed.
+
+**Firewall.** Open exactly 22, 80, 443:
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp      # SSH
+sudo ufw allow 80/tcp      # ACME HTTP-01 challenge + http→https redirect
+sudo ufw allow 443/tcp     # the app
+sudo ufw enable
+```
+
+Docker-published ports bypass ufw's INPUT chain entirely, so the firewall is not what keeps the
+internal services private — `docker-compose.prod.yml` is. Only `caddy` publishes 80/443 on all
+interfaces; MinIO's console publishes on `127.0.0.1:9001` only (reach it with
+`ssh -L 9001:127.0.0.1:9001 <host>`); Qdrant, Mongo, Redis, vision, the MinIO S3 API, and the
+backend publish nothing.
+
 ---
 
 ## 1. Register the OAuth apps
@@ -92,11 +135,23 @@ Mongo, Redis, MinIO) pulled and started without incident. An operator on a host 
 internet access will not hit this; it is recorded here because §2's discipline is to report a
 failure with its real cause, not omit it.
 
-## 5. `npm run setup:qdrant`
+**Amended (task 8.20):** `up --wait` over the whole file exits **1** on Compose 2.40 even when
+everything is healthy — the one-shot `minio-init` container exiting (status 0) is itself
+reported as a failure. Verified live. Harmless by hand, but any script or CI step checking the
+exit code reads every successful deploy as failed. `deploy.sh` runs `minio-init` via
+`compose run --rm` (a meaningful exit code) and passes `up --wait` every other service by name.
+
+## 5. `setup-qdrant`
 
 ```bash
-cd backend && npm run setup:qdrant
+docker compose -f docker-compose.prod.yml exec -T backend node scripts/setup-qdrant.js
 ```
+
+**Amended (task 8.20):** this step originally read `cd backend && npm run setup:qdrant`, run on
+the host. Against the production stack that cannot work: prod Qdrant publishes no host port,
+and on the host `dotenv` loads `backend/.env` — the *development* config — so the script either
+fails to connect or, on a dev box with the dev stack up, silently indexes the wrong Qdrant. It
+runs inside the `backend` container, which carries the compose environment and `scripts/`.
 
 **Must follow step 4 and precede any ingest.** This creates the `is_tenant` payload index on
 `userId` for both `cerebro_chunks` and `cerebro_pages` (`providers/vectorStore.js`'s
@@ -116,9 +171,12 @@ escalation shape, not a convenience.
 ## 7–8. Run the tenancy migration — dry run, then commit
 
 ```bash
-node backend/scripts/migrate-to-tenancy.js --user <bootstrap admin address>            # dry run
-node backend/scripts/migrate-to-tenancy.js --user <bootstrap admin address> --commit
+docker compose -f docker-compose.prod.yml exec -T backend node scripts/migrate-to-tenancy.js --user <bootstrap admin address>            # dry run
+docker compose -f docker-compose.prod.yml exec -T backend node scripts/migrate-to-tenancy.js --user <bootstrap admin address> --commit
 ```
+
+Inside the container for the same reason as step 5: from the repo root on the host, `dotenv`
+loads the root `.env`, which has no `MONGO_URI`, and the script exits at config load.
 
 Dry run first, always — it reports exactly what would move (document count, chunk count) without
 writing anything, so a wrong `--user` value is caught before it does anything irreversible.

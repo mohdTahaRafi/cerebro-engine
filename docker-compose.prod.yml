@@ -209,7 +209,12 @@ services:
       # Admin console only. The S3 API (9000) stays off the host entirely — `backend` is
       # the only client, and it reaches MinIO over the internal Docker network at
       # http://minio:9000, never through a published port.
-      - "9001:9001"
+      #
+      # Bound to loopback, not 0.0.0.0: this console logs in with MINIO_ROOT_USER/PASSWORD,
+      # and on a public host a bare "9001:9001" is an internet-facing root login (Docker's
+      # published ports also bypass ufw's INPUT chain, so the host firewall would not catch
+      # it). Reach it from your machine with `ssh -L 9001:127.0.0.1:9001 <host>`.
+      - "127.0.0.1:9001:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 10s
@@ -221,8 +226,10 @@ services:
         limits: { memory: 512M }
 
   # One-shot: creates the bucket backend/src/providers/storage.js's S3 driver writes to.
-  # Exits after running; `--wait` treats a zero-exit one-shot container as satisfied rather
-  # than waiting on it to stay "running."
+  # Exits after running. Amended (task 8.20): `up --wait` does NOT treat a zero-exit one-shot
+  # as satisfied — verified live on Compose 2.40, it returns exit 1 once this container
+  # exits, even with status 0. deploy.sh therefore runs this service via `compose run --rm`
+  # and passes `up --wait` an explicit service list without it.
   minio-init:
     image: minio/mc:latest
     depends_on:

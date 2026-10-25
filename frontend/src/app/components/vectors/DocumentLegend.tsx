@@ -39,7 +39,11 @@ export function DocumentLegend({ documents, docIndex, hidden, onToggle }: Docume
             onClick={() => onToggle(i)}
             aria-pressed={!isHidden}
             title={isHidden ? `${doc.fileName} — hidden, click to show` : `${doc.fileName} — click to dim`}
-            className="flex items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-surface-sunken focus-visible:ring-[3px] focus-visible:ring-signal-ring"
+            // `group` is load-bearing, not decoration: the Eye icon below is styled
+            // `group-hover:opacity-100`, and with no group ancestor that variant never
+            // matches — the icon sat permanently at opacity-0, so a visible document
+            // showed no affordance at all while a hidden one showed EyeOff.
+            className="group flex items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-surface-sunken focus-visible:ring-[3px] focus-visible:ring-signal-ring"
           >
             <span
               className="size-2.5 shrink-0 rounded-full"
@@ -52,7 +56,7 @@ export function DocumentLegend({ documents, docIndex, hidden, onToggle }: Docume
             <span className="shrink-0 text-[11px] tabular-nums text-graphite">{counts[i] ?? 0}</span>
             {isHidden
               ? <EyeOff className="size-3 shrink-0 text-graphite" aria-hidden="true" />
-              : <Eye className="size-3 shrink-0 text-graphite opacity-0 group-hover:opacity-100" aria-hidden="true" />}
+              : <Eye className="size-3 shrink-0 text-graphite opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />}
           </button>
         );
       })}

@@ -7,13 +7,14 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'rea
 import { useThree } from '@react-three/fiber';
 import { OrbitControls as DreiOrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { boundingSphere, fitDistance, type Bounds } from './framing';
 
 export interface SceneControlsHandle {
   resetView(): void;
 }
 
 interface SceneControlsProps {
-  bounds: { min: [number, number, number]; max: [number, number, number] };
+  bounds: Bounds;
 }
 
 export const SceneControls = forwardRef<SceneControlsHandle, SceneControlsProps>(function SceneControls({ bounds }, ref) {
@@ -21,23 +22,18 @@ export const SceneControls = forwardRef<SceneControlsHandle, SceneControlsProps>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
 
-  const { center, radius } = useMemo(() => {
-    const c: [number, number, number] = [
-      (bounds.min[0] + bounds.max[0]) / 2,
-      (bounds.min[1] + bounds.max[1]) / 2,
-      (bounds.min[2] + bounds.max[2]) / 2,
-    ];
-    const dx = bounds.max[0] - bounds.min[0];
-    const dy = bounds.max[1] - bounds.min[1];
-    const dz = bounds.max[2] - bounds.min[2];
-    const r = Math.max(0.5, Math.sqrt(dx * dx + dy * dy + dz * dz) / 2);
-    return { center: c, radius: r };
-  }, [bounds]);
+  const { center, radius } = useMemo(() => boundingSphere(bounds), [bounds]);
 
   const frame = () => {
-    const fov = (camera as THREE.PerspectiveCamera).fov ?? 50;
-    const margin = 1.2;
-    const distance = (radius * margin) / Math.sin((fov * Math.PI) / 360);
+    const persp = camera as THREE.PerspectiveCamera;
+    const distance = fitDistance(radius, persp.fov);
+    // near/far scale with the cloud too. The fixed 0.05/1000 they replace worked for a
+    // cloud of radius ~10 and silently failed outside that: a large fit (radius > ~330)
+    // sat beyond the far plane and rendered nothing at all, while at the near end a
+    // fixed 0.05 wastes almost the whole depth buffer's precision on empty space.
+    persp.near = Math.max(0.01, radius * 0.01);
+    persp.far = Math.max(distance * 4, radius * 40);
+    persp.updateProjectionMatrix();
     camera.position.set(center[0], center[1], center[2] + distance);
     camera.lookAt(center[0], center[1], center[2]);
     const controls = controlsRef.current;

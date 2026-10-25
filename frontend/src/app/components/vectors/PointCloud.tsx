@@ -4,13 +4,18 @@
 // `size`/`alpha`/`ring` attributes IN PLACE via the imperative handle below — never by
 // rebuilding the geometry — so a re-color or a hover is one attribute upload, not a
 // re-upload of positions (task 4.20: `renderer.info.memory.geometries` does not increase).
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import type { DecodedProjection } from './decodeProjection';
+import { boundingSphere, fitDistance } from './framing';
 
 const BASE_SIZE = 6;
 const RAISED_SIZE = 11;
 const DIM_ALPHA = 0.12;
+
+// The alpha the farthest point of a fully-framed cloud fades to. Enough separation to read
+// as depth, not so much that the back of the cloud stops being data.
+const FAR_ALPHA = 0.45;
 
 export interface BeaconNeighbor { index: number; kept: boolean }
 
@@ -49,27 +54,51 @@ export const PointCloud = forwardRef<PointCloudHandle, PointCloudProps>(function
   alphaAttrRef.current = geometry.getAttribute('alpha') as THREE.BufferAttribute;
   ringAttrRef.current = geometry.getAttribute('ring') as THREE.BufferAttribute;
 
+  // A projection rebuild swaps `decoded`, which builds a whole new geometry. The old one
+  // holds GPU buffers that nothing frees on its own — three.js has no GC hook — so a
+  // context left open across a few rebuilds leaks one full position/color/size/alpha/ring
+  // set each time.
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  const { radius } = useMemo(() => boundingSphere(decoded.bounds), [decoded.bounds]);
+  const fitDist = useMemo(() => fitDistance(radius), [radius]);
+
   const material = useMemo(() => new THREE.ShaderMaterial({
     vertexColors: true, transparent: true, depthWrite: false,
     blending: THREE.NormalBlending,
-    uniforms: { uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) } },
+    uniforms: {
+      uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+      // Both scale uniforms come from framing.ts, so the cloud is sized against the same
+      // distance the camera frames it from rather than against absolute world units that
+      // only suited one particular corpus. See framing.ts's header for what that fixed.
+      uFitDistance: { value: fitDist },
+      uRadius: { value: radius },
+    },
     vertexShader: `
       attribute float size;
       attribute float alpha;
       attribute float ring;
       varying vec3 vColor; varying float vAlpha; varying float vRing;
       uniform float uPixelRatio;
+      uniform float uFitDistance;
+      uniform float uRadius;
       void main() {
         vColor = color;
         vAlpha = alpha;
         vRing = ring;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        // Perspective-correct point size, clamped so a near point does not become a
-        // screen-filling square.
-        gl_PointSize = clamp(size * uPixelRatio * (300.0 / -mv.z), 1.0, 28.0);
-        // Depth fade: distant points recede rather than forming a flat wall.
-        float depthFade = clamp(1.0 - (-mv.z - 40.0) / 120.0, 0.15, 1.0);
-        vAlpha *= depthFade;
+        float dist = max(-mv.z, 0.001);
+        // Perspective-correct point size expressed RELATIVE to the framing distance: at
+        // the default view the factor is ~1, so a BASE_SIZE point is BASE_SIZE CSS pixels
+        // whatever scale this particular UMAP fit came out at. Clamped in device pixels
+        // (hence the uPixelRatio on the ceiling) so a near point does not become a
+        // screen-filling square and a far one never disappears entirely.
+        gl_PointSize = clamp(size * uPixelRatio * (uFitDistance / dist), 1.0, 28.0 * uPixelRatio);
+        // Depth fade across the cloud's own front-to-back extent — distant points recede
+        // rather than forming a flat wall, and zooming past the front face holds full
+        // alpha instead of washing the near points out.
+        float t = clamp((dist - (uFitDistance - uRadius)) / (2.0 * uRadius), 0.0, 1.0);
+        vAlpha *= mix(1.0, ${FAR_ALPHA.toFixed(2)}, t);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -86,8 +115,18 @@ export const PointCloud = forwardRef<PointCloudHandle, PointCloudProps>(function
         } else {
           gl_FragColor = vec4(vColor, vAlpha * smoothstep(0.25, 0.16, r));
         }
+        // REQUIRED, and its absence is invisible in code review rather than at runtime.
+        // decodeProjection converts each document's sRGB hex to LINEAR space because
+        // R3F enables THREE.ColorManagement; three.js re-encodes to the output color
+        // space for its built-in materials via this chunk, but a ShaderMaterial gets
+        // whatever its author writes. Without it the cloud rendered markedly darker and
+        // more saturated than the very legend swatches it is supposed to be keyed to —
+        // a bright red document drawing as dark maroon.
+        #include <colorspace_fragment>
       }`,
-  }), []);
+  }), [fitDist, radius]);
+
+  useEffect(() => () => material.dispose(), [material]);
 
   function recompute() {
     const sizeAttr = sizeAttrRef.current!;

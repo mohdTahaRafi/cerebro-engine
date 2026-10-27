@@ -8,6 +8,8 @@ import { Login } from './pages/auth/Login';
 import { Signup } from './pages/auth/Signup';
 import { ForgotPassword } from './pages/auth/ForgotPassword';
 import { ResetPassword } from './pages/auth/ResetPassword';
+import { Privacy } from './pages/legal/Privacy';
+import { Terms } from './pages/legal/Terms';
 import { NotFound } from './pages/NotFound';
 import { Chat } from './pages/Chat';
 import { ContextList } from './pages/contexts/ContextList';
@@ -28,6 +30,8 @@ export const router = createBrowserRouter([
   { path: '/signup', Component: Signup },             // public
   { path: '/forgot-password', Component: ForgotPassword }, // public
   { path: '/reset-password', Component: ResetPassword },   // public
+  { path: '/privacy', Component: Privacy },           // public — Google's OAuth consent screen links here
+  { path: '/terms', Component: Terms },               // public
   {
     element: <RequireAuth />,
     children: [

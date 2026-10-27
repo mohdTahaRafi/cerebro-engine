@@ -183,8 +183,11 @@ export function Signup() {
                 className="mt-0.5 size-5"
               />
               <span>
-                I agree to the <span className="font-medium text-signal">Terms of Service</span> and{' '}
-                <span className="font-medium text-signal">Privacy Policy</span>
+                {/* New tab: navigating away in this one would discard the half-filled form. */}
+                I agree to the{' '}
+                <Link to="/terms" target="_blank" rel="noopener" className="font-medium text-signal hover:underline">Terms of Service</Link>{' '}
+                and{' '}
+                <Link to="/privacy" target="_blank" rel="noopener" className="font-medium text-signal hover:underline">Privacy Policy</Link>
               </span>
             </label>
             {fieldErrors.terms && <p role="alert" className="pl-8 text-xs text-critical">{fieldErrors.terms}</p>}

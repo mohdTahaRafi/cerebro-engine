@@ -10,6 +10,7 @@ import { Link } from 'react-router';
 import { Waypoints } from 'lucide-react';
 import { AtmosphericBackground } from '../design/AtmosphericBackground';
 import { ThemeToggle } from '../design/ThemeToggle';
+import { CONTACT_EMAIL } from '../../lib/legal';
 
 export interface AuthFeatureRow {
   icon: LucideIcon;
@@ -53,7 +54,7 @@ export function AuthHeader({ headerLinkLabel, headerLinkTo }: AuthHeaderProps) {
             {headerLinkLabel}
           </Link>
         ) : (
-          <a href="mailto:support@cerebro.dev" className="text-base font-medium text-ink-secondary outline-none hover:text-signal focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
+          <a href={`mailto:${CONTACT_EMAIL}`} className="text-base font-medium text-ink-secondary outline-none hover:text-signal focus-visible:ring-[3px] focus-visible:ring-signal-ring rounded-sm">
             Contact
           </a>
         )}
@@ -63,21 +64,27 @@ export function AuthHeader({ headerLinkLabel, headerLinkTo }: AuthHeaderProps) {
   );
 }
 
+/** Privacy · Terms · Security, shared by AuthFooter and /reset-password's own footer.
+ *  Security has no page yet — plain text, not a dead link (DESIGN.md §6.1 footer). */
+export function LegalLinks() {
+  return (
+    <div className="flex items-center gap-2">
+      <Link to="/privacy" className="hover:text-signal">Privacy</Link>
+      <span aria-hidden="true">•</span>
+      <Link to="/terms" className="hover:text-signal">Terms</Link>
+      <span aria-hidden="true">•</span>
+      <span>Security</span>
+    </div>
+  );
+}
+
 /** The copyright + legal-links strip shared by every auth route — see AuthHeader for
- *  why this is pulled out rather than duplicated. Privacy/Terms/Security have no
- *  routes yet — plain text, not dead links, until those pages exist (DESIGN.md §6.1
- *  footer). */
+ *  why this is pulled out rather than duplicated. */
 export function AuthFooter() {
   return (
     <div className="mt-[clamp(0.5rem,1.5vh,1rem)] hidden shrink-0 items-center justify-between text-[13px] text-graphite lg:flex">
       <span>© {new Date().getFullYear()} Cerebro. All rights reserved.</span>
-      <div className="flex items-center gap-2">
-        <span>Privacy</span>
-        <span aria-hidden="true">•</span>
-        <span>Terms</span>
-        <span aria-hidden="true">•</span>
-        <span>Security</span>
-      </div>
+      <LegalLinks />
     </div>
   );
 }

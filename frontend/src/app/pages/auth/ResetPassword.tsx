@@ -24,7 +24,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { ArrowRight, Loader2, Lock, Pencil, Waypoints } from 'lucide-react';
 import { AtmosphericBackground } from '../../components/design/AtmosphericBackground';
-import { AuthHeader } from '../../components/auth/AuthShell';
+import { AuthHeader, LegalLinks } from '../../components/auth/AuthShell';
 import { BackendUnreachable } from '../../components/design/BackendUnreachable';
 import { RouteLoading } from '../../components/design/RouteLoading';
 import { OtpInput } from '../../components/design/OtpInput';
@@ -463,12 +463,8 @@ export function ResetPassword() {
             the legal links sit in the main area, bottom-right — desktop only, matching
             AuthFooter's own `hidden ... lg:flex` convention of dropping the footer on
             mobile entirely rather than squeezing it into the stacked flow. */}
-        <div className="hidden items-center gap-2 text-[13px] text-graphite lg:absolute lg:bottom-6 lg:right-10 lg:flex">
-          <span>Privacy</span>
-          <span aria-hidden="true">•</span>
-          <span>Terms</span>
-          <span aria-hidden="true">•</span>
-          <span>Security</span>
+        <div className="hidden text-[13px] text-graphite lg:absolute lg:bottom-6 lg:right-10 lg:block">
+          <LegalLinks />
         </div>
       </div>
     </div>

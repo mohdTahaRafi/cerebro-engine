@@ -55,7 +55,7 @@ export function Login() {
     setFieldErrors({});
     setPending(true);
     try {
-      await signIn({ email, password });
+      await signIn({ email, password, remember });
       // AuthContext.signIn resolved without throwing → status flips to 'authenticated'
       // on the next render, and the guard above performs the redirect.
     } catch (err) {

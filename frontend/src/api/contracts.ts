@@ -35,7 +35,8 @@ export interface SessionUser {
 export interface SessionResponse { user: SessionUser | null; }
 
 export interface SignupRequest { email: string; password: string; name?: string; }
-export interface LoginRequest  { email: string; password: string; }
+/** `remember`: true keeps the session cookie for 7 days; otherwise it ends with the browser. */
+export interface LoginRequest  { email: string; password: string; remember?: boolean; }
 
 /** POST /api/auth/signup — phase_5 §7/§8: identical body whether the address was new or
  *  already had an account, so a client cannot tell those two cases apart from this

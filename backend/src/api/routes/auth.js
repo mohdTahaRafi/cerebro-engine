@@ -136,7 +136,9 @@ router.post('/api/auth/login', async (req, res, next) => {
           // wrong — the local strategy already collapses both to `done(null, false)`.
           return res.status(401).json({ code: 'invalid_credentials', message: "That email and password don't match an account." });
         }
-        await establishSession(req, user);
+        // "Remember me" (Login.tsx): only an explicit true keeps the 7-day cookie;
+        // unticked or absent signs in for this browser session only.
+        await establishSession(req, user, { persistent: req.body?.remember === true });
         return res.status(200).json({ user: toSessionUser(user) });
       } catch (innerErr) { next(innerErr); }
     })(req, res, next);

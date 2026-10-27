@@ -17,11 +17,19 @@ const USESS_TTL_SECONDS = 7 * 24 * 60 * 60;   // matches the session cookie's ma
 //   req.session.credentialVersion = user.credentialVersion
 //   SADD usess:<userId> <newSid>   ← so logout-all can find it
 //   EXPIRE usess:<userId> 604800
-export function establishSession(req, user) {
+//
+// `persistent: false` (login with "Remember me" unticked) makes cerebro.sid a browser-
+// session cookie — no Expires/Max-Age, so the browser drops it when it closes. Set after
+// regenerate (which builds a fresh cookie from session.js's 7-day default) and before
+// save. maxAge null also sets originalMaxAge null, and `rolling`'s per-request touch()
+// copies originalMaxAge back, so it stays a session cookie for its whole life. The
+// server-side record keeps the store's 7-day TTL either way.
+export function establishSession(req, user, { persistent = true } = {}) {
   return new Promise((resolve, reject) => {
     req.session.regenerate(async (err) => {
       if (err) return reject(err);
       try {
+        if (!persistent) req.session.cookie.maxAge = null;
         req.session.userId = String(user._id);
         req.session.credentialVersion = user.credentialVersion;
         req.session.save(async (saveErr) => {

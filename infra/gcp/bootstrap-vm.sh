@@ -49,7 +49,8 @@ if ! groups "$USER" | grep -qw docker; then
   NEEDS_RELOGIN=1
 fi
 
-if ! swapon --show | grep -q /swapfile; then
+# swapon lives in /sbin, which is not on a non-root user's PATH on Debian — hence sudo.
+if ! sudo swapon --show | grep -q /swapfile; then
   step "Swap ($SWAP_SIZE)"
   sudo fallocate -l "$SWAP_SIZE" /swapfile
   sudo chmod 600 /swapfile

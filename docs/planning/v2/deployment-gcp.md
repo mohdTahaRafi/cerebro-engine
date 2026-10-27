@@ -59,19 +59,25 @@ accepted cost is no high availability: if the VM is down, the site is down (§7)
 error GCP returns when billing is missing (`Consumer 'projects/…' has been suspended`) does not
 mention billing at all.
 
-Status of this account as of 2026-10-27: project `cerebro-506919` is **suspended** and all four
-billing accounts on `taharafi05@gmail.com` are **closed**. To fix that, in
-console.cloud.google.com:
+**The live deployment** (provisioned 2026-10-28) runs under Google account
+`taharafi005@gmail.com`, project `project-59520b61-0065-4492-ae8`, billing account
+`010386-5DD1C4-172E43` (free trial). The older account `taharafi05@gmail.com` has a suspended
+project (`cerebro-506919`) and only closed billing accounts — it is **not** used. gcloud must be
+logged in as the account that owns the project: `gcloud auth login`, pick that account, then
+`gcloud config set project <id>`. A "does not have permission … (or it may not exist)" error
+on a project you can see in the browser means the CLI is on the other account.
+
+For a project without billing, in console.cloud.google.com:
 
 1. **Billing → Manage billing accounts.** If a "Free trial" banner offers credit, activate it
-   (it creates a new, open billing account). The $300 trial is once per customer; if one of the
-   closed accounts already used it, reopen that account instead (**Billing → the account →
+   (it creates a new, open billing account). The $300 trial is once per customer; if a closed
+   account already used it, reopen that account instead (**Billing → the account →
    Reactivate**), which requires upgrading it to a paid account.
-2. **Billing → Account management → Linked projects**: link `cerebro-506919` to the open
-   account. Linking an open account lifts a billing-caused suspension. If the console shows a
-   different suspension reason (a policy notice), that has to be appealed from the banner —
-   linking billing will not clear it.
-3. Confirm from your terminal: `gcloud billing projects describe cerebro-506919` →
+2. **Billing → Account management → Linked projects**: link the project to the open account.
+   Linking an open account lifts a billing-caused suspension. If the console shows a different
+   suspension reason (a policy notice), that has to be appealed from the banner — linking
+   billing will not clear it.
+3. Confirm from your terminal: `gcloud billing projects describe <project>` →
    `billingEnabled: true`.
 
 ### 1.2 The free-trial clock
@@ -79,7 +85,8 @@ console.cloud.google.com:
 | Fact | Consequence for this deployment |
 |---|---|
 | The trial credit is $300 and **expires 90 days after activation**, whichever runs out first | At ~$65–70/month (§8) the credit outlasts the 90 days, so **the date, not the money, ends it** |
-| When the trial ends, Compute Engine resources are **stopped**; GCP deletes them if the account is not upgraded within 30 days | Upgrade to a paid account before day 90 (remaining credit carries over) or the site goes down and, 30 days later, the disk and its snapshots are deleted |
+| The live deployment's trial was activated well before provisioning: on 2026-10-28 the console showed ₹28,663 credit and **35 days remaining** | The trial ends on or about **2026-12-02**. The console's "Free trial status" banner is the authority on the exact date |
+| When the trial ends, Compute Engine resources are **stopped**; GCP deletes them if the account is not upgraded within 30 days | Upgrade to a paid account before the trial ends (remaining credit carries over) or the site goes down and, 30 days later, the disk and its snapshots are deleted |
 | Trial accounts cannot use GPUs | ColPali stays off (`COLPALI_ENABLED=false`, the default) — scanned PDFs are still searchable through OCR |
 
 Set a budget alert so the spend is never a surprise (Billing → Budgets & alerts → Create
@@ -99,8 +106,8 @@ budget, scoped to the project, thresholds at 50% / 90% / 100% of $300).
 ## 2. Provision the VM — `infra/gcp/provision.sh`
 
 ```bash
-gcloud config set project cerebro-506919
-PROJECT_ID=cerebro-506919 ./infra/gcp/provision.sh
+gcloud config set project project-59520b61-0065-4492-ae8
+PROJECT_ID=project-59520b61-0065-4492-ae8 ./infra/gcp/provision.sh
 ```
 
 What it creates, each only if absent (re-running after a partial failure is safe):
@@ -136,6 +143,19 @@ within five minutes):
 **Delete whatever the registrar put there by default** for `@` and `www` — Namecheap, for
 example, adds a "URL Redirect Record" and a `www` CNAME to a parking page. A leftover record
 either resolves to the wrong address or makes the A record ambiguous.
+
+**The live deployment:** `cerebrodigital.tech` (GitHub Student Pack via get.tech; the registrar
+of record is **Namify Domains Inc**, IANA 1913, `registrarcontact@namify.tech`; DNS on the
+registrar's own `cont603385.*.orderbox-dns.com` nameservers) → static IP `34.14.164.192`. Before
+the change, both `@` and `www` held the registrar's parking A record `104.198.156.20`; that
+record is replaced, not kept alongside — two A records for one name make resolvers alternate
+between the VM and the parking page. Edit the existing `@` and `www` A records in the
+registrar's DNS panel.
+
+Observed 2026-10-28: the Namify dashboard (`namify.get.tech`) briefly stopped listing the
+domain, and its nameservers answered roughly 1 query in 4 with no A record. The registry
+showed the domain active throughout. Moving DNS to Cloudflare (free; one nameserver change at
+the registrar) removes this dependency and adds free Email Routing for `contact@`.
 
 If the domain's DNS is on Cloudflare instead, set both records to **DNS only** (grey cloud):
 Cloudflare's proxy terminates TLS itself and answers the ACME challenge in Caddy's place.
@@ -264,7 +284,8 @@ is verified, then delete it.
 | Disk fills | Log rotation and `docker builder prune` keep it from happening in practice; if it does, Mongo and Redis stop accepting writes | Uploads and sign-ins fail; `df -h` on the VM shows it |
 | Cohere quota exhausted (trial key) | Embed/rerank calls return 429; the breaker opens | Questions and uploads fail with a "provider unavailable" message until the month resets |
 | LLM provider down | Generation fails; retrieval still works | An error in place of the answer; sources still listed |
-| Trial credit or 90 days runs out | GCP stops the VM | The site is unreachable until the account is upgraded (§1.2) |
+| Trial credit or the trial period runs out (2026-12-02 for the live deployment) | GCP stops the VM | The site is unreachable until the account is upgraded (§1.2) |
+| A pinned image is withdrawn from its registry | Already-pulled images keep running; a fresh VM's `./deploy.sh` stops at that service with "pull access denied" (this is how the 2026-10-28 deploy found MinIO's images gone) | Nothing, on the running site. A rebuild from scratch blocks until the image line is replaced |
 | The VM or zone is lost | No failover — single VM by design (§0) | Down until restored from the latest snapshot (§6.1), at most 24 h of data lost |
 
 ---
@@ -302,6 +323,6 @@ These do not block a deployment, but each one matters once people other than you
 |---|---|
 | Upgrade the Cohere key from trial | 1,000 calls/month total is used up quickly by a handful of active users (§1.3) |
 | Review the LLM provider's data terms | A free-tier Gemini key's terms have allowed Google to use submitted content to improve its products (v1 deployment.md §3.5). Users upload private documents |
-| Pin `minio/minio:latest` and `minio/mc:latest` in docker-compose.prod.yml | A floating tag means two deploys of the same commit can run different MinIO versions |
+| Watch the MinIO fork | MinIO Inc. withdrew its public images in 2026, so docker-compose.prod.yml runs `pgsty/minio` (community fork, pinned release). Bump the pinned tags deliberately; if the fork goes quiet, `cgr.dev/chainguard/minio` is the fallback (check it still ships `curl`, which the healthcheck needs) |
 | Configure SMTP | Without it there is no email OTP, so no self-service password reset (deployment.md §2) |
-| Upgrade the GCP account before day 90 | §1.2 |
+| Upgrade the GCP account before the trial ends (2026-12-02) | §1.2 |

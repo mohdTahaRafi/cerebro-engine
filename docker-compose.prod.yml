@@ -198,7 +198,11 @@ services:
         limits: { memory: 2G }
 
   minio:
-    image: minio/minio:latest
+    # MinIO Inc. withdrew its public images (Docker Hub's minio/minio is gone; quay.io now
+    # requires auth), so this is pgsty's community-maintained fork — same binary, CLI, and
+    # /minio/health/live endpoint, and it still ships curl for the healthcheck below.
+    # Pinned to a release so two deploys of one commit always run the same MinIO.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
@@ -231,7 +235,7 @@ services:
   # exits, even with status 0. deploy.sh therefore runs this service via `compose run --rm`
   # and passes `up --wait` an explicit service list without it.
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-10-26T00-00-00Z   # the same fork's client — see minio's comment
     depends_on:
       minio: { condition: service_healthy }
     environment:

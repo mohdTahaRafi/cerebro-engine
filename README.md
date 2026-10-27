@@ -128,6 +128,7 @@ cerebro/
 ├── docs/                     # specs, runbooks, bug register — see docs/README.md
 ├── DESIGN.md                 # UI design system
 ├── deploy.sh                 # one-command production deploy (preflight → build → up → smoke test)
+├── infra/gcp/               # Compute Engine provisioning + VM bootstrap (docs/planning/v2/deployment-gcp.md)
 ├── docker-compose.yml        # dev stack: Qdrant, MongoDB, Redis, vision
 ├── docker-compose.prod.yml   # + backend, MinIO, Caddy, resource limits
 ├── docker-compose.prod.verify.yml, Caddyfile.verify   # `deploy.sh --local` overrides (tls internal)
@@ -219,7 +220,8 @@ per-service memory limits. **First deployment needs a strict order** (OAuth app 
 → `.env` → build → compose up → `setup:qdrant` → sign up the bootstrap admin → run the
 tenancy migration → verify isolation) — see
 [`docs/planning/v2/deployment.md`](docs/planning/v2/deployment.md) for every step spelled
-out, `docker-compose.prod.yml`'s and `Caddyfile`'s own comments for what each piece does and
+out (and [`deployment-gcp.md`](docs/planning/v2/deployment-gcp.md) for creating the host on
+Google Cloud first), `docker-compose.prod.yml`'s and `Caddyfile`'s own comments for what each piece does and
 why, `backend/bench/README.md` for the C++-vs-Qdrant benchmark, and
 `backend/scripts/migrate-legacy.js`'s header comment if you're carrying documents forward
 from a pre-Phase-3 installation.

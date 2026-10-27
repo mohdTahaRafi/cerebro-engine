@@ -18,6 +18,8 @@ finishes. `./deploy.sh --local` rehearses the identical stack on a dev box via
 
 ## 0. Host, DNS, firewall
 
+> **On Google Cloud:** [deployment-gcp.md](deployment-gcp.md) provisions this host (Compute Engine VM, static IP, VPC firewall, snapshots) with `infra/gcp/`. There the VPC firewall replaces the `ufw` rules below.
+
 **Host.** One Linux VM with Docker Engine + the Compose v2 plugin. Sizing, measured on the
 rehearsal stack (2026-10-15, ColPali off): the seven containers idle at ~860 MB combined, and
 the images total ~2.7 GB. The load peaks are a UMAP projection fit (backend, 2 GB limit —

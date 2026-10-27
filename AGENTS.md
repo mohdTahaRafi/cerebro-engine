@@ -65,6 +65,10 @@ tenancy/auth/observability platform layered on top of it.
 - `backend/scripts/` — `setup-qdrant.js` (idempotent collection creation),
   `check-providers.js`, `migrate-legacy.js` (one-time carry-forward from the pre-Phase-3
   MongoDB-vector pipeline).
+- `deploy.sh` (repo root) — the production deploy; `infra/gcp/` — `provision.sh` (creates
+  the Compute Engine VM, static IP, firewall, snapshot schedule; runs on the operator's
+  machine) and `bootstrap-vm.sh` (Docker, log rotation, swap, repo clone; runs on the VM).
+  See `docs/planning/v2/deployment-gcp.md`. Both create real, billed cloud resources.
 - `backend/test/` — standalone verification scripts per phase/subsystem, not a unified test
   framework (see Checks below for the ones with `npm run` scripts).
 - `frontend/src/app/` — React routes (`routes.tsx`), pages, components, context, and

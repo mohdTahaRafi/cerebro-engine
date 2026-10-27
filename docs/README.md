@@ -11,6 +11,7 @@ that were implemented in order.
 | [`planning/v2/architecture.md`](planning/v2/architecture.md) | **Start here.** The v2 platform: topology, data flow, auth, tenancy, observability, budgets, security model |
 | [`planning/v2/phase_1..8_*.md`](planning/v2/) | v2 phase specs, from the design system and auth UI through production hardening |
 | [`planning/v2/deployment.md`](planning/v2/deployment.md) | Production deploy runbook (automated by [`deploy.sh`](../deploy.sh)) |
+| [`planning/v2/deployment-gcp.md`](planning/v2/deployment-gcp.md) | Google Cloud: provisioning the VM, DNS, bootstrap, operations and cost (scripts in [`../infra/gcp/`](../infra/gcp/)) |
 | [`planning/v2/measurements.md`](planning/v2/measurements.md) | Measured results against the v2 performance budget |
 | [`planning/v2/alerts.yml`](planning/v2/alerts.yml) | Prometheus alert rules |
 | [`planning/architecture.md`](planning/architecture.md) | The v1 retrieval engine the platform runs on |

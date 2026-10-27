@@ -24,6 +24,11 @@ const STORAGE_KEY = 'cerebro.activeContext';
 // every consumer immediately, same as before.
 let scopeCache: { contexts: KnowledgeContext[]; activeId: string | null; status: ContextScopeStatus } | null = null;
 
+/** Called on sign-out (AuthContext) — see useThreads.ts's resetThreadsCache. */
+export function resetContextScopeCache() {
+  scopeCache = null;
+}
+
 // 'none'        — the list call succeeded and returned zero contexts.
 // 'unavailable' — the endpoint isn't there yet (no Context model on the backend outside
 //                 mock mode — Phase 2). Distinct from 'none': there may well BE contexts,

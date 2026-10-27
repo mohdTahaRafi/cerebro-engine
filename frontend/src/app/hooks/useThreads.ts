@@ -15,6 +15,13 @@ export type { ThreadSummary, ThreadSource, ThreadMessage } from '../../api/endpo
 // remount into the same scope never does.
 let threadsCache: { key: string | undefined; threads: ThreadSummary[] } | null = null;
 
+/** Called on sign-out (AuthContext). The cache outlives AppShell by design, so without
+ *  this the next sign-in in the same tab — possibly a different account — starts from the
+ *  previous session's thread list instead of fetching its own. */
+export function resetThreadsCache() {
+  threadsCache = null;
+}
+
 // GET/PATCH/DELETE /api/threads, now routed through src/api/ (phase_1 §8 — no behavior
 // change; this hook still owns no polling/caching layer beyond plain state).
 export function useThreads() {

@@ -3,6 +3,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, EndpointUnavailableError } from '../../api';
 import type { AuthCapabilities, LoginRequest, SessionUser, SignupRequest } from '../../api/contracts';
+import { resetContextScopeCache } from './ContextScopeContext';
+import { resetThreadsCache } from '../hooks/useThreads';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous' | 'unreachable';
 
@@ -90,6 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     await api.auth.logout();
+    // The contexts and recent-chats caches outlive AppShell (each file says why); a new
+    // session must fetch its own rather than inherit the one that just ended.
+    resetContextScopeCache();
+    resetThreadsCache();
     setUser(null);
     setStatus('anonymous');
   }, []);

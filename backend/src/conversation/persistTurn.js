@@ -14,6 +14,19 @@ import { buildTrace } from '../telemetry/traceCapture.js';
 import { recordPipelineError } from '../telemetry/pipelineError.js';
 
 export async function persistTurn(conversationId, tenant, userQuery, final, { telemetry, runId } = {}) {
+  // generate.js catches a provider failure (quota, outage) itself — it emits the
+  // user-facing error frame and returns an empty answer instead of throwing, so the graph
+  // still completes and lands here. There is no reply to store, and Message.content is
+  // required: record the turn the same way a thrown failure is recorded. Amended
+  // 2026-10-28 — writing the empty assistant message threw a validation error, which made
+  // ask.js write the question a second time (persistFailedTurn) and replace the friendly
+  // error in the client with "Message validation failed: content: Path `content` is
+  // required." (the client shows the last error frame it receives).
+  if (!final.answer) {
+    await persistFailedTurn(conversationId, tenant, userQuery);
+    return { traceId: null };
+  }
+
   await Message.create({
     conversationId, userId: tenant.userId, role: 'user', content: userQuery,
     condensedQuery: final.condensedQuery ?? null,

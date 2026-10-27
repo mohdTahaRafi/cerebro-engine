@@ -85,11 +85,12 @@ export const config = {
     // Google AI Studio key (aistudio.google.com/apikey) — deployment.md §3.5. Same lesson
     // as the Groq comment above: the model must be one the key can actually reach, so
     // check `GET https://generativelanguage.googleapis.com/v1beta/models` (header
-    // x-goog-api-key) before changing GEMINI_MODEL. gemini-2.5-flash is the default for
-    // its free-tier availability, speed, and native image input.
+    // x-goog-api-key) before changing GEMINI_MODEL. gemini-3.5-flash is the default: it has
+    // native image input, and on 2026-10-28 it was the newest Flash that answered reliably
+    // (gemini-2.5-flash now 404s for new keys; 3.7/3.8-flash timed out under demand).
     gemini: {
       apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+      model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
     },
   },
 

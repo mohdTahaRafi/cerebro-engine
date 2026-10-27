@@ -139,7 +139,7 @@ services:
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       # Only read when LLM_PROVIDER=gemini (deployment.md §3.5) — same key-only shape as Groq.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
       STORAGE_DRIVER: s3
       PAGE_STORAGE_DIR: /storage/pages
       S3_ENDPOINT: http://minio:9000

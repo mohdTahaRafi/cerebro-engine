@@ -5,7 +5,7 @@
 // turn it skips the LLM call on is one with no history AND no ready documents — there is
 // nothing to resolve the question against, and retrieval will refuse an empty corpus anyway.
 import * as llm from '../../providers/llm.js';
-import { Document } from '../../models/Document.js';
+import { loadContextDocuments } from '../contextDocuments.js';
 import { CONDENSE_PROMPT } from '../prompts.js';
 
 // A file name is ~10–20 tokens, so 25 names stay under ~500 prompt tokens. Past ~25 a
@@ -13,25 +13,9 @@ import { CONDENSE_PROMPT } from '../prompts.js';
 // are listed because a follow-up is most likely about what the user just uploaded.
 export const MAX_LISTED_DOCUMENTS = 25;
 
-// Ready documents in the request's context, by file name. `contextId: null` is the
-// deliberate user-wide scope (vectorStore.js §2) and lists across all the user's contexts.
-// A lookup failure degrades to an empty list rather than failing the turn — condensation
-// is an optimization, never a requirement (see the catch in condenseNode).
+// Ready documents in the request's context, by file name (graph/contextDocuments.js).
 async function loadDocumentNames(tenant) {
-  if (!tenant?.userId) return [];
-  try {
-    const filter = { userId: tenant.userId, status: 'ready' };
-    if (tenant.contextId) filter.contextId = tenant.contextId;
-    const docs = await Document.find(filter)
-      .sort({ updatedAt: -1 })
-      .limit(MAX_LISTED_DOCUMENTS)
-      .select('fileName')
-      .lean();
-    return docs.map((d) => d.fileName);
-  } catch (err) {
-    console.warn('[condense] could not list context documents:', err.message);
-    return [];
-  }
+  return (await loadContextDocuments(tenant, { limit: MAX_LISTED_DOCUMENTS })).names;
 }
 
 // 1024, not the original 150: reasoning models (Groq's openai/gpt-oss-120b, the configured

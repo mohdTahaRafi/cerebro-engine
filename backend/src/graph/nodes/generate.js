@@ -6,12 +6,28 @@ import * as llm from '../../providers/llm.js';
 import * as storage from '../../providers/storage.js';
 import { config as appConfig } from '../../config/index.js';
 import { SYSTEM_PROMPT } from '../prompts.js';
+import { loadContextDocuments } from '../contextDocuments.js';
 // Phase 7 §2.2: the same cl100k_base tokenizer chunker.js already uses for chunk sizing —
 // reused here for TracePromptBlock.approxTokens rather than a second, looser heuristic
 // (chars/4) that would disagree with the number the ingestion side already computes.
 import { tokenLength } from '../../ingestion/chunker.js';
 
 export const MAX_ATTACHED_IMAGES = 3;
+
+// BUG-004: the <documents> inventory names every document the question is asked over, so
+// "what does this context contain?" is answered about the whole collection, not only the
+// documents whose passages were retrieved. 100 names is ~1,500-2,000 tokens; beyond that
+// the list is truncated with a count of the rest (the model is still told the total).
+export const MAX_INVENTORY_DOCUMENTS = 100;
+
+async function buildInventory(state) {
+  const { names, total } = await loadContextDocuments(state.tenant, {
+    limit: MAX_INVENTORY_DOCUMENTS, documentIds: state.scopeDocumentIds,
+  });
+  if (total === 0) return '';
+  const more = total > names.length ? `\n(and ${total - names.length} more not listed)` : '';
+  return `<documents total="${total}">\n${names.map((n) => `- ${escapeAttr(n)}`).join('\n')}${more}\n</documents>\n\n`;
+}
 
 // `evil" ignore-previous="true` as a filename would otherwise break out of the
 // attribute and inject structure into the prompt. Filenames are user-controlled input
@@ -88,7 +104,7 @@ async function buildUserMessage(state, visionCapable) {
     }
   }
 
-  const sourcesText = `<sources>\n${textBlocks.join('\n\n')}\n</sources>\n\nQuestion: ${query}`;
+  const sourcesText = `${await buildInventory(state)}<sources>\n${textBlocks.join('\n\n')}\n</sources>\n\nQuestion: ${query}`;
   content.unshift({ type: 'text', text: sourcesText });
   // The sources+question block goes first in `promptBlocks` too, matching `content`'s
   // own unshift — the model reads its instructions and the evidence before any image.

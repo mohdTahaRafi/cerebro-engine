@@ -4,14 +4,15 @@
 // distinction /api/search's emptyResult already makes — see retrieval/search.js §5.2.
 import * as vectorStore from '../../providers/vectorStore.js';
 import { rerankOrDegrade } from '../../providers/reranker.js';
-import { toPublicResult, applyRelevanceGate } from '../../retrieval/search.js';
+import { toPublicResult } from '../../retrieval/search.js';
+import { selectSources } from '../../retrieval/selectSources.js';
 
-// Set by the generation context budget, not retrieval quality (phase 5 §6). Eight chunks
-// at ~480 tokens each is ~3,800 tokens of context; with up to 3 page images attached
-// (~1,600 tokens each for Claude's vision encoder) the worst case is ~8,600 tokens —
-// comfortable for a 200k-token model while keeping the model's attention concentrated.
-// More sources measurably dilute answer quality before they add coverage.
-export const TOP_N_SOURCES = 8;
+// Amended 2026-10-28 (BUG-004, docs/bugs/BUG-004-fixed-source-cap.md): there is no fixed
+// source count any more. Phase 5 §6 set TOP_N_SOURCES = 8 from the generation context
+// budget; measured on the live corpus, that cap dropped passages that cleared the
+// relevance gate and let an overview question see 2 of 3 documents. Every candidate is
+// now reranked (one Cohere call either way — the set stays <= 100, one search unit), and
+// selectSources picks by relevance, per-document coverage and a character budget.
 
 export async function rerankNode(state) {
   const query = state.condensedQuery ?? state.query;
@@ -27,12 +28,10 @@ export async function rerankNode(state) {
     };
   }
 
-  const { ranked, skipped } = await rerankOrDegrade(query, state.candidates, TOP_N_SOURCES);
-  // BUG-002's two-step gate (retrieval/search.js's applyRelevanceGate), reused here so the
-  // live /api/ask path applies the same accept/reject-then-retain logic /api/search does —
-  // a bare `relevanceScore >= RELEVANCE_FLOOR` filter would admit nearly everything now
-  // that RELEVANCE_FLOOR is 5e-5, not the old 0.15.
-  const { results: filtered } = applyRelevanceGate(ranked);
+  const { ranked, skipped } = await rerankOrDegrade(query, state.candidates, state.candidates.length);
+  // selectSources keeps BUG-002's accept/reject floor and retention step, adds per-document
+  // coverage, and bounds the result by size instead of count.
+  const filtered = selectSources(ranked);
   // toPublicResult (retrieval/search.js) is the same projection /api/search returns —
   // the generation prompt (generate.js's buildUserMessage) and /api/ask's `sources` SSE
   // event both read this shape (kind, text, imageUri, branch, fusionRank, finalRank, ...),

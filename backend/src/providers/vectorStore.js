@@ -367,6 +367,30 @@ export async function hybridQuery(tenant, { denseVector, sparseVector, limit, do
   });
 }
 
+// BUG-004: the best chunk per document, by dense similarity, for up to `limit` documents in
+// scope — Qdrant's grouped query (group_by on the indexed documentId payload), one round
+// trip. Feeds selectSources' coverage step: hybridQuery's 50 fused candidates can all come
+// from a few long documents, leaving others with nothing for the reranker to score. Same
+// tenant filter and hnsw_ef as hybridQuery's dense branch. No branch membership queries:
+// these are dense hits by construction.
+export async function coverageQuery(tenant, { denseVector, limit, documentIds = null }) {
+  assertTenant(tenant, 'coverageQuery');
+  const filter = scopedFilter(tenant, documentIds);
+  const res = await qdrantOpBreaker.fire(() => client().queryGroups(config.qdrant.chunksCollection, {
+    query: denseVector, using: 'dense', filter,
+    params: { hnsw_ef: HNSW_EF_SEARCH },
+    group_by: 'documentId', group_size: 1, limit,
+    with_payload: true, with_vector: false,
+  }));
+  return res.groups.flatMap((g) => g.hits).map((p) => ({
+    pointId: String(p.id),
+    fusionScore: null,     // not from RRF fusion
+    fusionRank: null,
+    branch: 'dense',
+    ...p.payload,
+  }));
+}
+
 // Total chunk count, optionally scoped to a set of documents — used by search.js to
 // distinguish "you have no documents" (empty_corpus) from "your documents don't cover
 // this" (no_relevant_matches), phase 3 §5.2.

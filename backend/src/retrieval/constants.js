@@ -48,6 +48,40 @@ export const RELEVANCE_FLOOR = 5e-5;
 // already instructs it to refuse when the context does not support an answer.
 export const RETENTION_FRACTION = 0.10;
 
+// ── Source selection for generation (BUG-004, docs/bugs/BUG-004-fixed-source-cap.md) ──
+// The answer's sources used to be "the reranker's top 8, then RETENTION_FRACTION". The
+// fixed 8 decided coverage by count, not by relevance or by how much the model can read,
+// and nothing ensured each relevant document was represented — an overview question
+// ("what is this context about?") could be answered from 2 of 3 documents. Selection is
+// now relevance-gated (as before), document-aware, and bounded by size, not count
+// (retrieval/selectSources.js).
+
+// A document whose best passage scores at least this fraction of the peak gets that
+// passage included, even below RETENTION_FRACTION. Measured on the live corpus
+// (2026-10-28, rerank-multilingual-v3.0): for overview questions, the weakest document's
+// best passage sat at 6.6e-2 and 1.2e-1 of the peak — all relevant; for specific
+// questions, unrelated documents sat at 5.1e-6, 7.4e-6 and 3.2e-4 of the peak. 0.01 is
+// ~6.6x below the weakest relevant document and ~31x above the strongest unrelated one.
+// Five questions over two contexts is a small sample; it separates the classes observed so
+// far by a wide margin on both sides, which is why a value between them was chosen rather
+// than one fitted tightly to either.
+export const COVERAGE_FRACTION = 0.01;
+
+// The size bound that replaces the fixed count: total characters of source text handed to
+// the generator. 60,000 chars is ~15k tokens — ~45 chunks at ~1,300 chars — about six times
+// the old 8-chunk context. Well inside every configured model's window (Gemini Flash and
+// Claude: 1M/200k tokens), and the relevance gate above usually stops selection long
+// before this does; the budget exists so a context of hundreds of near-equally relevant
+// documents cannot produce an unbounded prompt (latency and cost scale with it).
+export const SOURCE_CHAR_BUDGET = 60_000;
+
+// Coverage retrieval: the best passage per document, fetched alongside the fused query so
+// a document absent from FUSION_LIMIT's 50 candidates (common once a context holds more
+// than a handful of documents, since a few long documents can fill all 50 slots) can still
+// be represented. 40 keeps the reranked set at <= 100 (50 fused + 10 pages + 40), the size
+// Cohere bills as a single rerank search unit.
+export const COVERAGE_MAX_DOCS = 40;
+
 // Cohere embed v3 truncates at 512 tokens ~= 2,000 chars; 4,000 accepts pasted paragraphs
 // while bounding the request body. Beyond this the query is a document, not a question
 // (phase 3 §8).

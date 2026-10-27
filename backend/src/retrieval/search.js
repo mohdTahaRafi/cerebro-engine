@@ -15,7 +15,7 @@ import { recordPipelineTelemetry } from '../telemetry/metrics.js';
 import { mergeByProvenance } from './merge.js';
 import { createTimer } from './timer.js';
 import {
-  FUSION_LIMIT, PAGE_FUSION_LIMIT, RELEVANCE_FLOOR, RETENTION_FRACTION, STOPWORDS, TOP_N_DEFAULT,
+  COVERAGE_MAX_DOCS, FUSION_LIMIT, PAGE_FUSION_LIMIT, RELEVANCE_FLOOR, RETENTION_FRACTION, STOPWORDS, TOP_N_DEFAULT,
 } from './constants.js';
 
 const EMPTY_MESSAGES = {
@@ -158,7 +158,7 @@ const tracedRerank = traceable(
 // reimplementing the concurrent dense+sparse+ColPali calls. Takes the caller's timer
 // rather than owning one, so runSearch below keeps reporting one continuous set of marks
 // across the whole pipeline (retrieval + rerank) the way it always has.
-async function retrieveStage(tenant, query, documentIds, t) {
+async function retrieveStage(tenant, query, documentIds, t, { coverage = false } = {}) {
   // 1. Encode query — dense (Cohere API), sparse (local BM25), and ColPali multivector
   //    (vision service) all run concurrently. All three are independent network/local
   //    calls; serializing any of them would only add its latency to the others' critical
@@ -181,7 +181,7 @@ async function retrieveStage(tenant, query, documentIds, t) {
   //    same convention as rerankMs below: a mark for a branch that never attempted a real
   //    call would misreport 0ms as if it were a real, instantaneous retrieval.
   t.mark('retrieveStart');
-  const [chunkCandidates, pageCandidates] = await Promise.all([
+  const [fusedCandidates, pageCandidates, coverageCandidates] = await Promise.all([
     tracedRetrieve(tenant, {
       denseVector: denseRes.vector, sparseVector: sparseVec, limit: FUSION_LIMIT, documentIds,
     }).then((r) => { t.mark('retrieveEnd'); return r; }),
@@ -197,8 +197,20 @@ async function retrieveStage(tenant, query, documentIds, t) {
             return [];
           })
       : Promise.resolve([]),
+    // BUG-004: best chunk per document (vectorStore.coverageQuery), so selectSources can
+    // represent documents the fused 50 missed. Best-effort like the page branch: losing it
+    // only narrows coverage back to what fusion found.
+    coverage
+      ? vectorStore.coverageQuery(tenant, { denseVector: denseRes.vector, limit: COVERAGE_MAX_DOCS, documentIds })
+          .catch((err) => {
+            console.warn('[search] coverage retrieval failed, fused candidates only:', err.message);
+            return [];
+          })
+      : Promise.resolve([]),
   ]);
 
+  const fusedIds = new Set(fusedCandidates.map((c) => c.pointId));
+  const chunkCandidates = [...fusedCandidates, ...coverageCandidates.filter((c) => !fusedIds.has(c.pointId))];
   return { chunkCandidates, pageCandidates };
 }
 
@@ -222,7 +234,9 @@ export const retrieveCandidates = traceable(
   async function retrieveCandidates(tenant, rawQuery, { documentIds = null } = {}) {
     const t = createTimer();
     const query = normalize(rawQuery);
-    const { chunkCandidates, pageCandidates } = await retrieveStage(tenant, query, documentIds, t);
+    // coverage: the answer path selects by document as well as by score (selectSources);
+    // /api/search's runSearch returns a caller-sized topN and does not need it.
+    const { chunkCandidates, pageCandidates } = await retrieveStage(tenant, query, documentIds, t, { coverage: true });
     const candidates = mergeStage(chunkCandidates, pageCandidates, t);
     return {
       candidates,

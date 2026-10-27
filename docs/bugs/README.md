@@ -16,6 +16,7 @@ not an expectation.
 | [001](BUG-001-vision-embed-pages-envelope.md) | `visualResults.map is not a function` — every scanned PDF fails to ingest | ingestion / vision provider | Critical | **Fixed** |
 | [002](BUG-002-relevance-floor-absolute-threshold.md) | Answerable questions rejected with "I could not find anything…" | retrieval / relevance floor | High | **Fixed** |
 | [003](BUG-003-stopword-only-queries.md) | A stopword-only query (`the`) returns arbitrary content | retrieval / query validation | Medium | **Fixed** |
+| [004](BUG-004-fixed-source-cap.md) | A fixed cap of 8 sources let a broad question see 2 of 3 documents | retrieval / generation context | Medium | **Fixed** |
 
 ## Severity scale
 

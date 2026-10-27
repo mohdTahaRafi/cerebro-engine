@@ -3,7 +3,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import chardet from 'chardet';
 import xlsx from 'xlsx';
-import { LlamaParseReader } from '@llamaindex/cloud/reader';
 import { config } from '../config/index.js';
 import { wrap } from './breaker.js';
 
@@ -34,64 +33,59 @@ export async function ping() {
 
 // A distinct breaker name from 'llamaparse' (ping's) — same provider, different
 // operation, same pattern as 'cohere.embed' vs 'cohere.rerank' (architecture §6.1).
-// The wrapped function is `reader.loadData` itself, invoked with a bound reader per
-// call (a fresh LlamaParseReader per document, since parsingInstruction/language never
-// change but the SDK carries no reusable connection worth pooling).
 const parseBreaker = wrap('llamaparse.parse', (fn) => fn(), { timeout: 180_000 });
 
-async function parsePdfOrDocx(storagePath) {
-  const reader = new LlamaParseReader({
-    apiKey: config.llamaParse.apiKey,
-    resultType: 'markdown',
-    // Preserves table structure as markdown pipe tables instead of flattening to prose —
-    // the single setting that fixes the audit's "tables collapse to text" finding.
-    parsingInstruction:
-      'Preserve all table structure as markdown tables. Preserve heading hierarchy using ' +
-      'markdown heading levels. Do not summarize, omit, or reword any content.',
-    splitByPage: true,
-    invalidateCache: false,
-    language: 'en',
-    // Amended during Phase 2 implementation (phase 2 §4.2): default is true (silently
-    // swallows parse failures as []). False lets a genuinely broken PDF surface as a
-    // catchable error distinguishable from "parsed, zero text".
-    ignoreErrors: false,
-  });
+// Amended 2026-10-28: LlamaParse's v2 Parse API, called directly. The previous
+// implementation used @llamaindex/cloud's LlamaParseReader (deprecated since 4.1.0),
+// which speaks only the v1 API — and v1 now answers "The v1 Parse API is not available
+// for this account. Use the v2 Parse API instead" for newer accounts, so every PDF and
+// DOCX upload failed in production. Verified live with this deployment's key: upload →
+// PENDING → COMPLETED in ~6s for one page; `expand=markdown` returns
+// markdown.pages[] = { page_number, markdown, success }.
+//
+// cost_effective tier: text-layer PDFs and DOCX are what reach this parser (scanned
+// pages are routed through the vision service's OCR, phase 4), and its markdown output
+// keeps tables as pipe tables and headings as `#` levels — what the v1 parsingInstruction
+// asked for. agentic/agentic_plus spend several times the credits per page for layout
+// reasoning this pipeline does not use.
+const PARSE_TIER = 'cost_effective';
+const POLL_INTERVAL_MS = 2_000;   // a one-page job completes in ~6s; 2s keeps the added latency small
+const JOB_DEADLINE_MS = 170_000;  // inside parseBreaker's 180s, so the breaker's timeout never pre-empts this one's clearer error
 
-  let rawPages;
-  try {
-    rawPages = await parseBreaker.fire(() => reader.loadData(storagePath));
-  } catch (err) {
-    // Amended during Phase 2 implementation: an earlier version of this catch pattern-
-    // matched err.message against /broken|corrupt/i and /encrypt|password.protect/i,
-    // believing LlamaParse's specific failure reason (e.g. "PDF_IS_BROKEN",
-    // "PDF_IS_PROTECTED") reached the thrown error. Verified live against both a broken
-    // PDF and a real password-protected one (pypdf-generated) that it does not: the SDK
-    // logs the specific code/message via console.warn as a side effect, but the actual
-    // thrown Error's `.message` is always the generic
-    // "Failed to parse the file: <jobId>, status: ERROR" — confirmed via
-    // `Object.keys(err)` being empty, no `.code`, no structured detail at all. The two
-    // regexes above never matched anything real; this is the corrected version.
-    //
-    // What IS a reliable signal: this specific message shape means LlamaParse ran the
-    // job to completion and its own verdict was ERROR — a deterministic, per-document
-    // outcome that a same-file retry will reproduce identically. Any other shape
-    // (ECONNRESET, timeout, an axios 429/5xx during upload or polling) is a transport-
-    // level failure with no such guarantee, so it is left to fall through and retry.
-    if (/status: ERROR$/.test(err.message ?? '')) {
-      const e = new Error(
-        `LlamaParse could not extract this document (broken file, or password/DRM ` +
-        `protected — the specific reason is not exposed by the parser API): ${err.message}`,
-      );
+async function runParseJob(storagePath, ext) {
+  const form = new FormData();
+  // The stored file is named by its content hash, with no extension; LlamaParse detects
+  // the format from the uploaded filename, so give it one.
+  form.append('file', new Blob([await fs.readFile(storagePath)]), `document${ext}`);
+  form.append('configuration', JSON.stringify({ tier: PARSE_TIER, version: 'latest' }));
+  const created = await requestRaw('/api/v2/parse/upload', { method: 'POST', data: form });
+
+  const deadline = Date.now() + JOB_DEADLINE_MS;
+  for (;;) {
+    const { job } = await requestRaw(`/api/v2/parse/${created.id}`, { method: 'GET' });
+    if (job.status === 'COMPLETED') break;
+    if (job.status === 'FAILED') {
+      // LlamaParse ran the job to completion and its own verdict was failure — a
+      // deterministic, per-document outcome a same-file retry reproduces, so it is
+      // classified as CORRUPT_DOCUMENT (not retried) rather than left to BullMQ.
+      const e = new Error(`LlamaParse could not extract this document: ${job.error_message ?? 'no reason given'}`);
       e.code = 'CORRUPT_DOCUMENT';
       throw e;
     }
-    throw err;   // transient (429, 5xx, network) — retried by BullMQ via classify()
+    if (job.status === 'CANCELLED') throw new Error(`LlamaParse job ${created.id} was cancelled`);
+    if (Date.now() > deadline) throw new Error(`LlamaParse job ${created.id} still ${job.status} after ${JOB_DEADLINE_MS / 1000}s`);
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 
-  // Amended during Phase 2 implementation (phase 2 §4.2): verified live against
-  // @llamaindex/cloud@4.1.3 — Document objects returned with splitByPage:true carry
-  // metadata: {} (empty). Page numbers are the array position, not a metadata field.
-  return rawPages.map((p, i) => ({ text: p.text, metadata: { page: i + 1 } }));
+  const { markdown } = await requestRaw(`/api/v2/parse/${created.id}`, { method: 'GET', params: { expand: 'markdown' } });
+  return markdown.pages;
+}
+
+async function parsePdfOrDocx(storagePath, ext) {
+  // Anything other than CORRUPT_DOCUMENT (an axios 429/5xx, a network error, a timeout)
+  // is transient and propagates to BullMQ's retry via classify().
+  const pages = await parseBreaker.fire(() => runParseJob(storagePath, ext));
+  return pages.map((p) => ({ text: p.markdown ?? '', metadata: { page: p.page_number } }));
 }
 
 // Escape pipes so a cell containing "|" cannot break the table structure downstream.
@@ -160,7 +154,7 @@ const DOC_EXTS = new Set(['.pdf', '.docx']);
 // document's original fileName — the only reliable place to read it once the file is
 // stored under its content hash with no extension.
 export async function parseDocument(storagePath, ext) {
-  if (DOC_EXTS.has(ext)) return parsePdfOrDocx(storagePath);
+  if (DOC_EXTS.has(ext)) return parsePdfOrDocx(storagePath, ext);
   if (SPREADSHEET_EXTS.has(ext)) return parseSpreadsheet(storagePath);
   if (ext === '.json') return parseJson(storagePath);
   if (TEXT_EXTS.has(ext)) {

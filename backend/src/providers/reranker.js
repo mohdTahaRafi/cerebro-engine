@@ -14,13 +14,10 @@ function client() {
 // inside the interactive query budget.
 export const rerankBreaker = wrap('cohere.rerank', (req) => client().rerank(req), { timeout: 5_000 });
 
+// Metadata only, never a billed rerank — see embeddings.js ping() for why.
 export async function ping() {
-  await rerankBreaker.fire({
-    model: config.cohere.rerankModel,
-    query: 'ping',
-    documents: ['pong', 'unrelated'],
-    topN: 1,
-  });
+  await client().models.get(config.cohere.rerankModel);
+  if (rerankBreaker.opened) throw new Error('recent rerank calls are failing (circuit open)');
 }
 
 // ── Phase 3: cross-encoder reranking ─────────────────────────────────────────

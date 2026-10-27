@@ -17,14 +17,33 @@ const router = express.Router();
 // GET /health probes every dependency CONCURRENTLY and reports each independently.
 // A single aggregate boolean would be useless for the failure modes in architecture
 // §6.2, where the correct behavior is partial degradation.
+// Third-party probes are cached for EXTERNAL_PROBE_TTL_MS. /health is hit every 15s by
+// the Docker HEALTHCHECK and every 30s by each open tab's HealthIndicator; local
+// dependencies can take that, but a third party's API should not see a call per tab per
+// half-minute just to confirm a key still works. A minute of staleness in a status dot
+// is harmless. The cache holds the settled promise, so concurrent requests share one call.
+const EXTERNAL_PROBE_TTL_MS = 60_000;
+function cachedProbe(fn) {
+  let at = 0;
+  let pending = null;
+  return () => {
+    if (!pending || Date.now() - at > EXTERNAL_PROBE_TTL_MS) {
+      at = Date.now();
+      pending = fn();
+      pending.catch(() => {});   // the caller's probe() observes the rejection
+    }
+    return pending;
+  };
+}
+
 const PROBES = {
   mongo:      () => mongoose.connection.db.admin().ping(),
   qdrant:     () => vectorStore.ping(),
   redis:      () => redis.ping(),
   vision:     () => visionService.health(),
-  cohere:     () => embeddings.ping(),
-  llamaparse: () => parser.ping(),
-  llm:        () => llm.ping(),
+  cohere:     cachedProbe(() => embeddings.ping()),
+  llamaparse: cachedProbe(() => parser.ping()),
+  llm:        cachedProbe(() => llm.ping()),
 };
 
 async function probe(name, fn) {

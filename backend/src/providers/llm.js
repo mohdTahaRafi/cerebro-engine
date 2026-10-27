@@ -58,15 +58,52 @@ export function chatModel({ temperature = 0, maxTokens = 1024 } = {}) {
   });
 }
 
-// architecture §6.1: a long grounded answer streams for up to ~90s; the breaker guards
-// a hung socket, not slowness. Phase 1 only exercises this with a trivial ping; Phase 5's
-// generation node fires the same breaker with the real prompt.
-const llmBreaker = wrap('llm.generate', (model, input) => model.invoke(input), { timeout: 120_000 });
+// /health's probe. It asks the provider's model-metadata endpoint — free, and proof that
+// the key is accepted and the model exists — and never generates. Amended 2026-10-28:
+// ping() used to invoke the model with "Reply with the single word: pong", and with the
+// Docker HEALTHCHECK (every 15s) plus every open tab's HealthIndicator (every 30s) hitting
+// /health, that spent a free-tier Gemini key's whole daily quota (20 requests) within
+// minutes of deploy — the probe itself was what took generation down. A metadata check
+// cannot see quota exhaustion; generation reports that itself, per request.
+async function getJson(url, init) {
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${config.llm.provider} ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
 
-// Phase 1 only implements chatModel() + ping(). Streaming generation lands in Phase 5.
+async function checkModel() {
+  const { provider } = config.llm;
+  if (provider === 'gemini') {
+    const { apiKey, model } = config.llm.gemini;
+    await getJson(`https://generativelanguage.googleapis.com/v1beta/models/${model}`, {
+      headers: { 'x-goog-api-key': apiKey },
+    });
+  } else if (provider === 'groq') {
+    // Listed rather than fetched by id: Groq model ids contain a slash
+    // (openai/gpt-oss-120b), which does not survive as a single path segment.
+    const { apiKey, model } = config.llm.groq;
+    const { data } = await getJson('https://api.groq.com/openai/v1/models', {
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
+    if (!data.some((m) => m.id === model)) throw new Error(`groq: model ${model} is not available to this key`);
+  } else if (provider === 'ollama') {
+    const { baseUrl, model } = config.llm.ollama;
+    await getJson(`${baseUrl}/api/show`, { method: 'POST', body: JSON.stringify({ model }) });
+  } else {
+    const { apiKey, model } = config.llm.anthropic;
+    await getJson(`https://api.anthropic.com/v1/models/${model}`, {
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    });
+  }
+}
+
+const pingBreaker = wrap('llm', checkModel, { timeout: 12_000 });
+
 export async function ping() {
-  const model = chatModel({ temperature: 0, maxTokens: 5 });
-  await llmBreaker.fire(model, 'Reply with the single word: pong');
+  await pingBreaker.fire();
 }
 
 // Phase 5 §7.3: an explicit FR-GEN edge case is LLM_PROVIDER=ollama/groq configured with

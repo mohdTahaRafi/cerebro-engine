@@ -15,13 +15,17 @@ function client() {
 // without holding a worker.
 export const embedBreaker = wrap('cohere.embed', (req) => client().embed(req), { timeout: 10_000 });
 
+// /health's probe: Cohere's model-metadata endpoint, which is not billed against the
+// key's call quota (a trial key allows 1,000 calls/month; an embed per health check at
+// the Docker HEALTHCHECK's 15s interval would spend that in about four hours). Its own
+// breaker, so a failing probe never opens the breaker real embedding traffic runs on.
+const pingBreaker = wrap('cohere', (model) => client().models.get(model), { timeout: 10_000 });
+
 export async function ping() {
-  await embedBreaker.fire({
-    model: config.cohere.embedModel,
-    texts: ['ping'],
-    inputType: 'search_document',
-    embeddingTypes: ['float'],
-  });
+  await pingBreaker.fire(config.cohere.embedModel);
+  // The metadata call cannot see a spent quota; real embedding traffic can. If it has
+  // been failing enough to open its breaker, report that rather than "up".
+  if (embedBreaker.opened) throw new Error('recent embed calls are failing (circuit open)');
 }
 
 // ── Phase 2: real embedding ──────────────────────────────────────────────────
